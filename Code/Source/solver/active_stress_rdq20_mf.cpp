@@ -3,6 +3,8 @@
 
 #include "active_stress_rdq20_mf.h"
 
+#include "eigen3/Eigen/Dense"
+
 #include <algorithm>
 #include <cmath>
 
@@ -16,6 +18,11 @@ void RDQ20MF::read_model_specific_parameters(
   Kd0 = params.get_scalar("Kd0");
   alphaKd = params.get_scalar("alphaKd");
   SL0 = params.get_scalar("SL0");
+
+  r0 = params.get_scalar("r0");
+  alpha = params.get_scalar("alpha");
+  mu0_fP = params.get_scalar("mu0_fP");
+  mu1_fP = params.get_scalar("mu1_fP");
 }
 
 void RDQ20MF::distribute_model_specific_parameters(const CmMod &cm_mod,
@@ -28,6 +35,11 @@ void RDQ20MF::distribute_model_specific_parameters(const CmMod &cm_mod,
   cm.bcast(cm_mod, &Kd0);
   cm.bcast(cm_mod, &alphaKd);
   cm.bcast(cm_mod, &SL0);
+
+  cm.bcast(cm_mod, &r0);
+  cm.bcast(cm_mod, &alpha);
+  cm.bcast(cm_mod, &mu0_fP);
+  cm.bcast(cm_mod, &mu1_fP);
 }
 
 void RDQ20MF::init_local(Vector<double> &state) const {
@@ -82,12 +94,25 @@ void RDQ20MF::advance_time_step_local(const double t, const double dt,
     time_advanced += substep;
   }
 
+  // Advance the crossbridge moments (entries 16-19) from the updated RU state.
+  // The reference velocity v = -dSL/dt / SL0 reduces to -d(lambda)/dt because
+  // SL = SL0 * lambda; here it is expressed in reference time units [s^-1].
+  const double velocity = -fiber_stretch_rate / time_ms_to_s;
+  double state_XB[4];
+  for (int i = 0; i < 4; ++i)
+    state_XB[i] = state[xb_index(i)];
+  xb_implicit_update(dt_seconds, velocity, rates_T, state_RU, state_XB);
+
   // Serialize the updated RU probabilities back into the state vector.
   for (int TL = 0; TL < 2; ++TL)
     for (int TC = 0; TC < 2; ++TC)
       for (int TR = 0; TR < 2; ++TR)
         for (int CC = 0; CC < 2; ++CC)
           state[ru_index(TL, TC, TR, CC)] = state_RU[TL][TC][TR][CC];
+
+  // Serialize the updated crossbridge moments back into the state vector.
+  for (int i = 0; i < 4; ++i)
+    state[xb_index(i)] = state_XB[i];
 }
 
 double RDQ20MF::compute_active_tension_local(const Vector<double> &state,
@@ -184,6 +209,65 @@ void RDQ20MF::ru_forward_euler_substep(
                     flux_TC[TL][TC][TR][CC] + flux_TC[TL][1 - TC][TR][CC] -
                     flux_TR[TL][TC][TR][CC] + flux_TR[TL][TC][1 - TR][CC] -
                     flux_CC[TL][TC][TR][CC] + flux_CC[TL][TC][TR][1 - CC]);
+}
+
+void RDQ20MF::xb_implicit_update(double dt, double velocity,
+                                 const double (&rates_T)[2][2][2][2],
+                                 const double (&state_RU)[2][2][2][2],
+                                 double (&state_XB)[4]) const {
+  // Permissivity and the permissive/non-permissive probability fluxes from the
+  // updated RU state.
+  double permissivity = 0.0;
+  double flux_PN = 0.0;
+  double flux_NP = 0.0;
+  for (int TL = 0; TL < 2; ++TL)
+    for (int TR = 0; TR < 2; ++TR)
+      for (int CC = 0; CC < 2; ++CC) {
+        permissivity += state_RU[TL][1][TR][CC];
+        flux_PN += state_RU[TL][1][TR][CC] * rates_T[TL][1][TR][CC];
+        flux_NP += state_RU[TL][0][TR][CC] * rates_T[TL][0][TR][CC];
+      }
+
+  // Effective permissive->non-permissive and non-permissive->permissive rates.
+  const double k_PN = (permissivity >= 1.0e-12) ? flux_PN / permissivity : 0.0;
+  const double k_NP =
+      ((1.0 - permissivity) >= 1.0e-12) ? flux_NP / (1.0 - permissivity) : 0.0;
+
+  // Use the calibrated RDQ20-MF specialization of the general XB system:
+  // new XBs attach only in the permissive state (f_N = 0), and both XB
+  // populations share r(v) = r0 + alpha * |v|. Non-permissive moments
+  // are populated by P-to-N transitions of already-attached XBs.
+  const double r = r0 + alpha * std::abs(velocity);
+  const double diag_P = r + k_PN;
+  const double diag_N = r + k_NP;
+
+  // Implicit-Euler system (I - dt * A) x = rhs for the four moments. The matrix
+  // is zero-initialized so the structurally-zero entries are correct.
+  Eigen::Matrix<double, 4, 4> system = Eigen::Matrix<double, 4, 4>::Zero();
+  system(0, 0) = -diag_P;
+  system(1, 1) = -diag_P;
+  system(2, 2) = -diag_N;
+  system(3, 3) = -diag_N;
+  system(0, 2) = k_NP;
+  system(1, 3) = k_NP;
+  system(2, 0) = k_PN;
+  system(3, 1) = k_PN;
+  system(1, 0) = -velocity;
+  system(3, 2) = -velocity;
+  system *= -dt;
+  for (int i = 0; i < 4; ++i)
+    system(i, i) += 1.0;
+
+  Eigen::Matrix<double, 4, 1> rhs;
+  rhs(0) = state_XB[0] + dt * permissivity * mu0_fP;
+  rhs(1) = state_XB[1] + dt * permissivity * mu1_fP;
+  rhs(2) = state_XB[2];
+  rhs(3) = state_XB[3];
+
+  const Eigen::Matrix<double, 4, 1> solution =
+      system.colPivHouseholderQr().solve(rhs);
+  for (int i = 0; i < 4; ++i)
+    state_XB[i] = solution(i);
 }
 
 REGISTER_ACTIVE_STRESS_MODEL("RDQ20-MF", RDQ20MF);

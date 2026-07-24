@@ -52,10 +52,11 @@ public:
   /**
    * @brief Model parameters class.
    *
-   * Declares the regulatory-unit (RU) parameters. Crossbridge and active-tension
-   * parameters are added in later increments. The default values are the human
-   * body-temperature calibration of the reference implementation, expressed in
-   * the reference's own units (see the corresponding members below).
+   * Declares the regulatory-unit (RU) and crossbridge (XB) parameters. The
+   * active-tension parameters are added in a later increment. The default values
+   * are the human body-temperature calibration of the reference implementation,
+   * expressed in the reference's own units (see the corresponding members
+   * below).
    */
   class Parameters : public ActiveStressModelParameters {
   public:
@@ -70,6 +71,11 @@ public:
       add_parameter("Kd0", 0.381, required);
       add_parameter("alphaKd", -0.571, required);
       add_parameter("SL0", 2.2, required);
+
+      add_parameter("r0", 134.31, required);
+      add_parameter("alpha", 25.184, required);
+      add_parameter("mu0_fP", 32.653, required);
+      add_parameter("mu1_fP", 0.778, required);
     }
   };
 
@@ -169,6 +175,27 @@ private:
                                 const double (&rates_C)[2][2],
                                 double (&state_RU)[2][2][2][2]) const;
 
+  /**
+   * @brief Advance the four crossbridge moments by one implicit-Euler step.
+   *
+   * Computes the permissivity and the effective permissive/non-permissive
+   * transition rates from the updated RU probabilities, forms the 4x4 linear
+   * system for the implicit update and solves it in place for @p state_XB.
+   *
+   * @param[in] dt Outer time step [s].
+   * @param[in] velocity Shortening velocity @f$-\dot{SL}/SL_0@f$ [s^-1].
+   * @param[in] rates_T Central-tropomyosin transition rates,
+   *   indexed @c rates_T[TL][TC][TR][CC].
+   * @param[in] state_RU The updated 16 RU-state probabilities,
+   *   indexed @c state_RU[TL][TC][TR][CC].
+   * @param[in,out] state_XB The four crossbridge moments, ordered
+   *   @f$[\mu_P^0, \mu_P^1, \mu_N^0, \mu_N^1]@f$.
+   */
+  void xb_implicit_update(double dt, double velocity,
+                          const double (&rates_T)[2][2][2][2],
+                          const double (&state_RU)[2][2][2][2],
+                          double (&state_XB)[4]) const;
+
   /// @}
 
   /// @name Interface unit conversions (svMultiPhysics EM units to reference units)
@@ -200,6 +227,11 @@ private:
   double Kd0;     ///< Calcium dissociation constant at reference length [uM].
   double alphaKd; ///< Length dependence of the dissociation constant [uM/um].
   double SL0;     ///< Reference sarcomere length [um]; maps stretch to length.
+
+  double r0;     ///< Combined attachment-detachment rate at zero velocity [s^-1].
+  double alpha;  ///< Coefficient of |v| in r(v) = r0 + alpha * |v| [-].
+  double mu0_fP; ///< Permissive influx into the zeroth-moment crossbridge state [s^-1].
+  double mu1_fP; ///< Permissive influx into the first-moment crossbridge state [s^-1].
 
   /// @}
 };
