@@ -3,18 +3,31 @@
 
 #include "active_stress_rdq20_mf.h"
 
-#include "Core/Exception.h"
+#include <algorithm>
+#include <cmath>
 
 void RDQ20MF::read_model_specific_parameters(
     const ActiveStressModelParameters &params) {
-  // TODO: read model-specific parameters (added with the RU/XB dynamics in
-  // later increments). No parameters to read yet.
+  Kbasic = params.get_scalar("Kbasic");
+  Koff = params.get_scalar("Koff");
+  Q = params.get_scalar("Q");
+  mu = params.get_scalar("mu");
+  gamma = params.get_scalar("gamma");
+  Kd0 = params.get_scalar("Kd0");
+  alphaKd = params.get_scalar("alphaKd");
+  SL0 = params.get_scalar("SL0");
 }
 
 void RDQ20MF::distribute_model_specific_parameters(const CmMod &cm_mod,
                                                    const cmType &cm) {
-  // TODO: distribute model-specific parameters (added with the RU/XB dynamics
-  // in later increments). No parameters to distribute yet.
+  cm.bcast(cm_mod, &Kbasic);
+  cm.bcast(cm_mod, &Koff);
+  cm.bcast(cm_mod, &Q);
+  cm.bcast(cm_mod, &mu);
+  cm.bcast(cm_mod, &gamma);
+  cm.bcast(cm_mod, &Kd0);
+  cm.bcast(cm_mod, &alphaKd);
+  cm.bcast(cm_mod, &SL0);
 }
 
 void RDQ20MF::init_local(Vector<double> &state) const {
@@ -29,10 +42,52 @@ void RDQ20MF::advance_time_step_local(const double t, const double dt,
                                       const double fiber_stretch,
                                       const double fiber_stretch_rate,
                                       Vector<double> &state) const {
-  svmp::not_implemented(
-      "RDQ20-MF active stress dynamics are not implemented yet: the "
-      "regulatory-unit and crossbridge state updates are added in a later "
-      "increment.");
+  // Convert the svMultiPhysics electromechanics inputs to the reference units.
+  const double calcium_microM = calcium * calcium_mM_to_microM;
+  const double dt_seconds = dt * time_ms_to_s;
+  const double sarcomere_length = SL0 * fiber_stretch;
+
+  // Calcium/stretch-independent central-tropomyosin transition rates.
+  double rates_T[2][2][2][2];
+  ru_transition_rates_tropomyosin(rates_T);
+
+  // Troponin transition rates rates_C[CC][TC]: the calcium-binding row (CC = 0)
+  // depends on calcium and sarcomere length; the unbinding row (CC = 1) does
+  // not.
+  const double calcium_on_rate =
+      Koff /
+      (Kd0 - alphaKd * (kd_reference_sarcomere_length - sarcomere_length)) *
+      calcium_microM;
+  double rates_C[2][2];
+  rates_C[0][0] = calcium_on_rate;
+  rates_C[0][1] = calcium_on_rate;
+  rates_C[1][0] = Koff;
+  rates_C[1][1] = Koff / mu;
+
+  // Deserialize the 16 RU probabilities (entries 0-15). The crossbridge moments
+  // (entries 16-19) are left untouched by this increment.
+  double state_RU[2][2][2][2];
+  for (int TL = 0; TL < 2; ++TL)
+    for (int TC = 0; TC < 2; ++TC)
+      for (int TR = 0; TR < 2; ++TR)
+        for (int CC = 0; CC < 2; ++CC)
+          state_RU[TL][TC][TR][CC] = state[ru_index(TL, TC, TR, CC)];
+
+  // Forward-Euler substepping over the outer time step. The final substep is
+  // shortened so that the outer step is covered exactly.
+  double time_advanced = 0.0;
+  while (time_advanced <= dt_seconds - 1.0e-10) {
+    const double substep = std::min(ru_substep, dt_seconds - time_advanced);
+    ru_forward_euler_substep(substep, rates_T, rates_C, state_RU);
+    time_advanced += substep;
+  }
+
+  // Serialize the updated RU probabilities back into the state vector.
+  for (int TL = 0; TL < 2; ++TL)
+    for (int TC = 0; TC < 2; ++TC)
+      for (int TR = 0; TR < 2; ++TR)
+        for (int CC = 0; CC < 2; ++CC)
+          state[ru_index(TL, TC, TR, CC)] = state_RU[TL][TC][TR][CC];
 }
 
 double RDQ20MF::compute_active_tension_local(const Vector<double> &state,
@@ -40,6 +95,95 @@ double RDQ20MF::compute_active_tension_local(const Vector<double> &state,
   // TEMPORARY: returns zero until the active-tension formula is implemented in
   // a later increment.
   return 0.0;
+}
+
+void RDQ20MF::ru_transition_rates_tropomyosin(
+    double (&rates_T)[2][2][2][2]) const {
+  for (int TL = 0; TL < 2; ++TL)
+    for (int TR = 0; TR < 2; ++TR) {
+      const int permissive_neighbors = TL + TR;
+
+      // Rate of leaving the permissive central state (TC = 1).
+      const double closing_rate =
+          Kbasic * std::pow(gamma, 2 - permissive_neighbors);
+      // Rate of leaving the non-permissive central state (TC = 0).
+      const double opening_rate =
+          Q * Kbasic * std::pow(gamma, permissive_neighbors);
+
+      rates_T[TL][1][TR][0] = closing_rate;
+      rates_T[TL][1][TR][1] = closing_rate;
+      rates_T[TL][0][TR][0] = opening_rate / mu;
+      rates_T[TL][0][TR][1] = opening_rate;
+    }
+}
+
+void RDQ20MF::ru_forward_euler_substep(
+    double dt, const double (&rates_T)[2][2][2][2],
+    const double (&rates_C)[2][2], double (&state_RU)[2][2][2][2]) const {
+  // Probability fluxes from central-unit transitions.
+  double flux_TC[2][2][2][2]; // central tropomyosin
+  double flux_CC[2][2][2][2]; // central troponin
+  for (int TL = 0; TL < 2; ++TL)
+    for (int TC = 0; TC < 2; ++TC)
+      for (int TR = 0; TR < 2; ++TR)
+        for (int CC = 0; CC < 2; ++CC) {
+          flux_TC[TL][TC][TR][CC] =
+              state_RU[TL][TC][TR][CC] * rates_T[TL][TC][TR][CC];
+          flux_CC[TL][TC][TR][CC] =
+              state_RU[TL][TC][TR][CC] * rates_C[CC][TC];
+        }
+
+  // Effective transition rates of the boundary neighbours, obtained from the
+  // mean-field closure by conditioning the central-unit flux on the neighbour
+  // pair state.
+  double rate_left[2][2];
+  double rate_right[2][2];
+  for (int TL = 0; TL < 2; ++TL)
+    for (int TC = 0; TC < 2; ++TC) {
+      double flux_sum = 0.0;
+      double prob_sum = 0.0;
+      for (int TR = 0; TR < 2; ++TR)
+        for (int CC = 0; CC < 2; ++CC) {
+          flux_sum += flux_TC[TL][TC][TR][CC];
+          prob_sum += state_RU[TL][TC][TR][CC];
+        }
+      rate_left[TL][TC] = (prob_sum > 1.0e-12) ? flux_sum / prob_sum : 0.0;
+    }
+  for (int TR = 0; TR < 2; ++TR)
+    for (int TC = 0; TC < 2; ++TC) {
+      double flux_sum = 0.0;
+      double prob_sum = 0.0;
+      for (int TL = 0; TL < 2; ++TL)
+        for (int CC = 0; CC < 2; ++CC) {
+          flux_sum += flux_TC[TL][TC][TR][CC];
+          prob_sum += state_RU[TL][TC][TR][CC];
+        }
+      rate_right[TR][TC] = (prob_sum > 1.0e-12) ? flux_sum / prob_sum : 0.0;
+    }
+
+  // Probability fluxes from the boundary-neighbour transitions.
+  double flux_TL[2][2][2][2]; // left tropomyosin
+  double flux_TR[2][2][2][2]; // right tropomyosin
+  for (int TL = 0; TL < 2; ++TL)
+    for (int TC = 0; TC < 2; ++TC)
+      for (int TR = 0; TR < 2; ++TR)
+        for (int CC = 0; CC < 2; ++CC) {
+          flux_TL[TL][TC][TR][CC] =
+              state_RU[TL][TC][TR][CC] * rate_left[TC][TL];
+          flux_TR[TL][TC][TR][CC] =
+              state_RU[TL][TC][TR][CC] * rate_right[TC][TR];
+        }
+
+  // Forward-Euler update of the 16 RU probabilities.
+  for (int TL = 0; TL < 2; ++TL)
+    for (int TC = 0; TC < 2; ++TC)
+      for (int TR = 0; TR < 2; ++TR)
+        for (int CC = 0; CC < 2; ++CC)
+          state_RU[TL][TC][TR][CC] +=
+              dt * (-flux_TL[TL][TC][TR][CC] + flux_TL[1 - TL][TC][TR][CC] -
+                    flux_TC[TL][TC][TR][CC] + flux_TC[TL][1 - TC][TR][CC] -
+                    flux_TR[TL][TC][TR][CC] + flux_TR[TL][TC][1 - TR][CC] -
+                    flux_CC[TL][TC][TR][CC] + flux_CC[TL][TC][TR][1 - CC]);
 }
 
 REGISTER_ACTIVE_STRESS_MODEL("RDQ20-MF", RDQ20MF);

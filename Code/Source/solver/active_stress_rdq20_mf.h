@@ -52,12 +52,25 @@ public:
   /**
    * @brief Model parameters class.
    *
-   * @todo Model-specific parameters are added together with the RU/XB dynamics
-   * in later increments.
+   * Declares the regulatory-unit (RU) parameters. Crossbridge and active-tension
+   * parameters are added in later increments. The default values are the human
+   * body-temperature calibration of the reference implementation, expressed in
+   * the reference's own units (see the corresponding members below).
    */
   class Parameters : public ActiveStressModelParameters {
   public:
-    Parameters() : ActiveStressModelParameters(label) {}
+    Parameters() : ActiveStressModelParameters(label) {
+      constexpr bool required = true;
+
+      add_parameter("Kbasic", 13.0, required);
+      add_parameter("Koff", 100.0, required);
+      add_parameter("Q", 2.0, required);
+      add_parameter("mu", 10.0, required);
+      add_parameter("gamma", 12.0, required);
+      add_parameter("Kd0", 0.381, required);
+      add_parameter("alphaKd", -0.571, required);
+      add_parameter("SL0", 2.2, required);
+    }
   };
 
   /**
@@ -118,6 +131,77 @@ protected:
   virtual double
   compute_active_tension_local(const Vector<double> &state,
                                const double fiber_stretch) const override;
+
+private:
+  /// @name Regulatory-unit (RU) dynamics helpers
+  /// @{
+
+  /**
+   * @brief Compute the central-tropomyosin transition rate for each local RU
+   * configuration.
+   *
+   * Fills @p rates_T, indexed as @c rates_T[TL][TC][TR][CC], where TL, TC and TR
+   * are the binary left, central and right tropomyosin states and CC is the
+   * central troponin calcium-binding state. Each entry is the rate at which the
+   * central tropomyosin changes state for that configuration. Because the rate
+   * depends on the neighbour states TL and TR, nearest-neighbour cooperativity
+   * is retained through the tracked TL-TC-TR configuration. These rates depend
+   * only on the model parameters, not on calcium or stretch.
+   */
+  void ru_transition_rates_tropomyosin(double (&rates_T)[2][2][2][2]) const;
+
+  /**
+   * @brief Advance the 16 RU-state probabilities by one forward-Euler substep.
+   *
+   * Computes the probability fluxes caused by central-state transitions and the
+   * effective boundary-neighbour transitions from the mean-field closure, then
+   * updates @p state_RU in place.
+   *
+   * @param[in] dt Substep size [s].
+   * @param[in] rates_T Central-tropomyosin transition rates,
+   *   indexed @c rates_T[TL][TC][TR][CC].
+   * @param[in] rates_C Troponin transition rates, indexed @c rates_C[CC][TC].
+   * @param[in,out] state_RU The 16 RU-state probabilities,
+   *   indexed @c state_RU[TL][TC][TR][CC].
+   */
+  void ru_forward_euler_substep(double dt,
+                                const double (&rates_T)[2][2][2][2],
+                                const double (&rates_C)[2][2],
+                                double (&state_RU)[2][2][2][2]) const;
+
+  /// @}
+
+  /// @name Interface unit conversions (svMultiPhysics EM units to reference units)
+  /// @{
+
+  /// Calcium conversion, millimolar [mM] to micromolar [uM].
+  static constexpr double calcium_mM_to_microM = 1.0e3;
+
+  /// Time conversion, milliseconds [ms] to seconds [s].
+  static constexpr double time_ms_to_s = 1.0e-3;
+
+  /// @}
+
+  /// RU forward-Euler substep size [s].
+  static constexpr double ru_substep = 2.5e-5;
+
+  /// Fixed reference sarcomere length [um] in the length-dependent dissociation
+  /// constant (distinct from the parameter SL0).
+  static constexpr double kd_reference_sarcomere_length = 2.15;
+
+  /// @name RU model parameters (reference units)
+  /// @{
+
+  double Kbasic;  ///< Basic tropomyosin transition rate [s^-1].
+  double Koff;    ///< Troponin unbinding rate [s^-1].
+  double Q;       ///< Tropomyosin transition-rate asymmetry factor [-].
+  double mu;      ///< Calcium-binding cooperativity factor [-].
+  double gamma;   ///< Nearest-neighbour cooperativity factor [-].
+  double Kd0;     ///< Calcium dissociation constant at reference length [uM].
+  double alphaKd; ///< Length dependence of the dissociation constant [uM/um].
+  double SL0;     ///< Reference sarcomere length [um]; maps stretch to length.
+
+  /// @}
 };
 
 #endif
