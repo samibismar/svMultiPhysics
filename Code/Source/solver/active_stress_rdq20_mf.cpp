@@ -23,6 +23,11 @@ void RDQ20MF::read_model_specific_parameters(
   alpha = params.get_scalar("alpha");
   mu0_fP = params.get_scalar("mu0_fP");
   mu1_fP = params.get_scalar("mu1_fP");
+
+  LA = params.get_scalar("LA");
+  LM = params.get_scalar("LM");
+  LB = params.get_scalar("LB");
+  a_XB = params.get_scalar("a_XB");
 }
 
 void RDQ20MF::distribute_model_specific_parameters(const CmMod &cm_mod,
@@ -40,6 +45,11 @@ void RDQ20MF::distribute_model_specific_parameters(const CmMod &cm_mod,
   cm.bcast(cm_mod, &alpha);
   cm.bcast(cm_mod, &mu0_fP);
   cm.bcast(cm_mod, &mu1_fP);
+
+  cm.bcast(cm_mod, &LA);
+  cm.bcast(cm_mod, &LM);
+  cm.bcast(cm_mod, &LB);
+  cm.bcast(cm_mod, &a_XB);
 }
 
 void RDQ20MF::init_local(Vector<double> &state) const {
@@ -117,9 +127,14 @@ void RDQ20MF::advance_time_step_local(const double t, const double dt,
 
 double RDQ20MF::compute_active_tension_local(const Vector<double> &state,
                                              const double fiber_stretch) const {
-  // TEMPORARY: returns zero until the active-tension formula is implemented in
-  // a later increment.
-  return 0.0;
+  const double sarcomere_length = SL0 * fiber_stretch;
+
+  // Active tension from the permissive and non-permissive XB first moments
+  // (state entries 17 and 19), scaled by the single-overlap fraction and the
+  // upscaling factor a_XB. The moments and overlap fraction are dimensionless,
+  // so the returned tension has the same stress unit as a_XB (no conversion).
+  return a_XB * (state[xb_index(1)] + state[xb_index(3)]) *
+         fraction_single_overlap(sarcomere_length);
 }
 
 void RDQ20MF::ru_transition_rates_tropomyosin(
@@ -268,6 +283,21 @@ void RDQ20MF::xb_implicit_update(double dt, double velocity,
       system.colPivHouseholderQr().solve(rhs);
   for (int i = 0; i < 4; ++i)
     state_XB[i] = solution(i);
+}
+
+double RDQ20MF::fraction_single_overlap(double sarcomere_length) const {
+  const double SL = sarcomere_length;
+  const double half_single_overlap = (LM - LB) * 0.5;
+
+  if (SL > LA && SL <= LM)
+    return (SL - LA) / half_single_overlap;
+  if (SL > LM && SL <= 2.0 * LA - LB)
+    return (SL + LM - 2.0 * LA) * 0.5 / half_single_overlap;
+  if (SL > 2.0 * LA - LB && SL <= 2.0 * LA + LB)
+    return 1.0;
+  if (SL > 2.0 * LA + LB && SL <= 2.0 * LA + LM)
+    return (LM + 2.0 * LA - SL) * 0.5 / half_single_overlap;
+  return 0.0;
 }
 
 REGISTER_ACTIVE_STRESS_MODEL("RDQ20-MF", RDQ20MF);

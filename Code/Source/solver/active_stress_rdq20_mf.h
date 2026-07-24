@@ -9,8 +9,36 @@
 /**
  * @brief RDQ20-MF mean-field active stress model.
  *
- * @todo Full model documentation (description, equations, references, units)
- * will be added after the complete implementation (increments 3-5).
+ * This class implements the mean-field RDQ20-MF sarcomere model of cardiomyocyte
+ * force generation described in [1] and is validated against the authors'
+ * reference implementation [2]. The node-local state has 20 variables: 16
+ * regulatory-unit (RU) probabilities (entries 0-15) describing the
+ * tropomyosin/troponin configuration of a triplet of neighbouring units, and 4
+ * crossbridge (XB) moments (entries 16-19). The RU probabilities are advanced
+ * with an explicit forward-Euler substepping scheme and the XB moments with one
+ * implicit-Euler step per time step; the active tension is then reconstructed
+ * from the XB first moments.
+ *
+ * The active tension is
+ * @f[
+ *   T_\text{act} = a_\text{XB} \, (\mu_P^1 + \mu_N^1) \, \phi(SL)\;,
+ * @f]
+ * where @f$\mu_P^1@f$ and @f$\mu_N^1@f$ are the permissive and non-permissive
+ * first XB moments (state entries 17 and 19), @f$\phi(SL)@f$ is the single-overlap
+ * fraction of the sarcomere at sarcomere length @f$SL = SL_0 \, \lambda@f$ (with
+ * @f$\lambda@f$ the fiber stretch), and @f$a_\text{XB}@f$ is the tension
+ * upscaling factor. Because @f$\mu_P^1 + \mu_N^1@f$ and @f$\phi(SL)@f$ are
+ * dimensionless, @f$a_\text{XB}@f$ sets the units of the returned active tension;
+ * it is stored in the stress units of the simulation, so no separate output
+ * conversion is applied.
+ *
+ * The model is calibrated in a fixed unit system (calcium in [uM], time in [s],
+ * length in [um]); the svMultiPhysics inputs are converted to these units at the
+ * interface (see the conversion members below).
+ *
+ * **References**:
+ * 1. [Regazzoni, Dede', Quarteroni (2020)](https://doi.org/10.1371/journal.pcbi.1008294)
+ * 2. [F. Regazzoni, cardiac-activation reference implementation](https://github.com/FrancescoRegazzoni/cardiac-activation)
  */
 class RDQ20MF : public ActiveStress {
 public:
@@ -52,11 +80,18 @@ public:
   /**
    * @brief Model parameters class.
    *
-   * Declares the regulatory-unit (RU) and crossbridge (XB) parameters. The
-   * active-tension parameters are added in a later increment. The default values
-   * are the human body-temperature calibration of the reference implementation,
-   * expressed in the reference's own units (see the corresponding members
-   * below).
+   * Declares the regulatory-unit (RU), crossbridge (XB), geometry, and tension
+   * parameters. The values registered below correspond to the published human
+   * body-temperature calibration of the reference implementation, expressed in
+   * the units documented for each member. The registered value of @c a_XB,
+   * 22.894, expresses the reference calibration in MPa; the value supplied in
+   * solver.xml must instead use the stress unit of the simulation's mechanical
+   * configuration.
+   *
+   * All parameters are required. A complete @c RDQ20-MF parameter block containing
+   * every parameter must be provided in solver.xml. Any value may be changed to
+   * use a different calibration, but omitting a parameter causes a parse error;
+   * the registered reference value is not used as an automatic default.
    */
   class Parameters : public ActiveStressModelParameters {
   public:
@@ -76,6 +111,11 @@ public:
       add_parameter("alpha", 25.184, required);
       add_parameter("mu0_fP", 32.653, required);
       add_parameter("mu1_fP", 0.778, required);
+
+      add_parameter("LA", 1.25, required);
+      add_parameter("LM", 1.65, required);
+      add_parameter("LB", 0.18, required);
+      add_parameter("a_XB", 22.894, required);
     }
   };
 
@@ -119,8 +159,10 @@ protected:
   /**
    * @brief Advance in time for a single node.
    *
-   * @note Not implemented yet: the RU and XB state updates are added in later
-   * increments. Calling this method throws an exception.
+   * Advances the RU probabilities (entries 0-15) with the forward-Euler
+   * substepping scheme and then the XB moments (entries 16-19) with one
+   * implicit-Euler step, using the calcium, fiber stretch and fiber-stretch rate
+   * at the node.
    */
   virtual void advance_time_step_local(const double t, const double dt,
                                        const double calcium,
@@ -131,8 +173,10 @@ protected:
   /**
    * @brief Compute the active tension for a single node.
    *
-   * @note Temporary: returns zero until the active-tension formula is
-   * implemented in a later increment.
+   * Evaluates @f$T_\text{act} = a_\text{XB} (\mu_P^1 + \mu_N^1) \phi(SL)@f$ from
+   * the XB first moments (state entries 17 and 19) and the single-overlap
+   * fraction at @f$SL = SL_0 \, \lambda@f$, where @f$\lambda@f$ is @p
+   * fiber_stretch. The result is in the stress units of the simulation.
    */
   virtual double
   compute_active_tension_local(const Vector<double> &state,
@@ -196,6 +240,17 @@ private:
                           const double (&state_RU)[2][2][2][2],
                           double (&state_XB)[4]) const;
 
+  /**
+   * @brief Single-overlap fraction of the sarcomere at a given length.
+   *
+   * Returns the fraction @f$\phi(SL) \in [0, 1]@f$ of the sarcomere over which
+   * thin and thick filaments overlap exactly once, a piecewise-linear function
+   * of the sarcomere length built from the filament geometry (LA, LM, LB).
+   *
+   * @param[in] sarcomere_length Sarcomere length @f$SL@f$ [um].
+   */
+  double fraction_single_overlap(double sarcomere_length) const;
+
   /// @}
 
   /// @name Interface unit conversions (svMultiPhysics EM units to reference units)
@@ -232,6 +287,22 @@ private:
   double alpha;  ///< Coefficient of |v| in r(v) = r0 + alpha * |v| [-].
   double mu0_fP; ///< Permissive influx into the zeroth-moment crossbridge state [s^-1].
   double mu1_fP; ///< Permissive influx into the first-moment crossbridge state [s^-1].
+
+  double LA; ///< Thin-filament (actin) length [um].
+  double LM; ///< Thick-filament (myosin) length [um].
+  double LB; ///< Length of the myosin bare zone [um].
+
+  /// Tension upscaling factor.
+  ///
+  /// Because the crossbridge moments and the overlap fraction are dimensionless,
+  /// a_XB is the only quantity carrying stress units, so the returned active
+  /// tension has the same stress unit as a_XB and no stress-unit conversion is
+  /// performed. a_XB must therefore be expressed in the same stress unit as the
+  /// mechanical configuration. The reference calibration value 22.894 is
+  /// expressed in MPa, consistent with the coupled electromechanics slab case;
+  /// the equivalent values are 22.894e3 in kPa and 22.894e6 in Pa. Provide the
+  /// value matching the case's stress unit.
+  double a_XB;
 
   /// @}
 };
