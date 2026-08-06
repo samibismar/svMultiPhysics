@@ -69,7 +69,34 @@ public:
      *                                    \fiberstretchrate_i^n)\;.
      * @f]
      */
-    ForwardEuler
+    ForwardEuler,
+
+    /**
+     * @brief 4th order explicit Runge-Kutta.
+     *
+     * The state vector is updated as follows:
+     * @f[ \begin{aligned}
+     *  \mathbf{k}_1 &= \mathbf{F}_\text{AS}(t^n, \astressstate_i^n,
+     *    \calcium_i^n, \fiberstretch_i^n, \fiberstretchrate_i^n)\;, \\
+     *  \mathbf{k}_2 &= \mathbf{F}_\text{AS}(t^n + \Delta t / 2,
+     *    \astressstate_i^n + \Delta t \mathbf{k}_1 / 2, \calcium_i^n,
+     *    \fiberstretch_i^n, \fiberstretchrate_i^n)\;, \\
+     *  \mathbf{k}_3 &= \mathbf{F}_\text{AS}(t^n + \Delta t / 2,
+     *    \astressstate_i^n + \Delta t \mathbf{k}_2 / 2, \calcium_i^n,
+     *    \fiberstretch_i^n, \fiberstretchrate_i^n)\;, \\
+     *  \mathbf{k}_4 &= \mathbf{F}_\text{AS}(t^{n+1},
+     *    \astressstate_i^n + \Delta t \mathbf{k}_3, \calcium_i^n,
+     *    \fiberstretch_i^n, \fiberstretchrate_i^n)\;, \\
+     *  \astressstate_i^{n+1} &= \astressstate_i^n + \frac{\Delta t}{6}
+     *    \left( \mathbf{k}_1 + 2 \mathbf{k}_2 + 2 \mathbf{k}_3
+     *           + \mathbf{k}_4 \right)\;.
+     * \end{aligned} @f]
+     *
+     * Note that the driving quantities @f$\calcium@f$, @f$\fiberstretch@f$ and
+     * @f$\fiberstretchrate@f$ are held fixed at their end-of-step values across
+     * all four stages.
+     */
+    RungeKutta4
   };
 
   /**
@@ -111,7 +138,7 @@ protected:
   /**
    * @brief Advance in time for a single node.
    *
-   * Solves one forward Euler time step for the ODE system.
+   * Advances the state vector by one step using the selected ODE solver.
    *
    * @param[in] t Current time (i.e. the time instant being advanced to).
    * @param[in] dt Time step size.
@@ -120,12 +147,6 @@ protected:
    * @param[in] fiber_stretch_rate Fiber stretch rate at the current node.
    * @param[in,out] state State vector for a single node, to be updated by
    *   this function.
-   *
-   * @todo[michelebucelli] It might be necessary or useful to implement other
-   *   timestepping schemes, e.g. Runge-Kutta. In that case, we might want to
-   *   expand the interface to support implicit time stepping too, e.g. by
-   *   adding a method to evaluate the Jacobian matrix of the system, as in
-   *   @ref IonicModel.
    */
   virtual void advance_time_step_local(const double t, const double dt,
                                        const double calcium,
