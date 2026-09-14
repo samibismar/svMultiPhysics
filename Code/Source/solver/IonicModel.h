@@ -121,8 +121,8 @@ public:
  * 6. Register the new class into the ionic model factory by using the macro
  *    @ref REGISTER_IONIC_MODEL. The macro should be called in a `.cpp`
  *    file, not in a header file.
- * 7. Edit the files `CepMod.h` and `CepMod.cpp` to add the label for the new
- *    ionic model type.
+ * 7. Add input aliases to `canonical_ionic_model_name` in `CepMod.cpp`, mapping
+ *    them to the same label used to register the model in the factory.
  */
 class IonicModel {
 public:

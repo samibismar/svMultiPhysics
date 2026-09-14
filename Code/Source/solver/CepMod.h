@@ -16,33 +16,12 @@
 
 #include "Array.h"
 #include "Vector.h"
-#include <map>
 #include <memory>
+#include <string>
 
-/// @brief Type of cardiac electrophysiology models.
-enum class ElectrophysiologyModelType {
-  NA = 100, 
-  AP = 101,
-  BO = 102, 
-  FN = 103, 
-  TTP = 104
-};
-
-extern const std::map<ElectrophysiologyModelType, std::string> cep_model_type_to_name;
-extern const std::map<std::string,ElectrophysiologyModelType> cep_model_name_to_type;
-
-/// @brief Print ElectrophysiologyModelType as a string.
-static std::ostream &operator << ( std::ostream& strm, ElectrophysiologyModelType type)
-{
-  const std::map<ElectrophysiologyModelType, std::string> names = { 
-    {ElectrophysiologyModelType::NA, "NA"}, 
-    {ElectrophysiologyModelType::AP,"AP"}, 
-    {ElectrophysiologyModelType::BO, "BO"}, 
-    {ElectrophysiologyModelType::FN, "FN"}, 
-    {ElectrophysiologyModelType::TTP, "TTP"}, 
-  };
-  return strm << names.at(type);
-}
+/// @brief Resolve a case-insensitive input alias to an ionic model factory name.
+/// @throws svmp::ParseException if the input does not name a supported model.
+std::string canonical_ionic_model_name(const std::string& input);
 
 class ComMod;
 class CmMod;
@@ -146,8 +125,8 @@ class cepModelType
     cepModelType();
     ~cepModelType();
 
-    /// @brief Type of cardiac electrophysiology model
-    ElectrophysiologyModelType cepType = ElectrophysiologyModelType::NA;
+    /// @brief Canonical ionic model factory name; empty before input is read.
+    std::string ionic_model_name;
 
     /// @brief Number of state variables
     int nX = 0;

@@ -8,28 +8,37 @@
 #include "Parameters.h"
 #include "utils.h"
 
+#include <algorithm>
+#include <cctype>
 #include <limits>
+#include <map>
 #include <math.h>
 
-const std::map<ElectrophysiologyModelType, std::string> cep_model_type_to_name{
-    {ElectrophysiologyModelType::NA, "NA"},
-    {ElectrophysiologyModelType::AP, "AP"},
-    {ElectrophysiologyModelType::BO, "BO"},
-    {ElectrophysiologyModelType::FN, "FN"},
-    {ElectrophysiologyModelType::TTP, "TTP"}
-};
-
-const std::map<std::string,ElectrophysiologyModelType> cep_model_name_to_type
+std::string canonical_ionic_model_name(const std::string& input)
 {
-  {"aliev-panfilov", ElectrophysiologyModelType::AP},
-  {"ap", ElectrophysiologyModelType::AP},
-  {"bueno-orovio", ElectrophysiologyModelType::BO},
-  {"bo", ElectrophysiologyModelType::BO},
-  {"fitzhugh-nagumo", ElectrophysiologyModelType::FN},
-  {"fn", ElectrophysiologyModelType::FN},
-  {"tentusscher-panfilov", ElectrophysiologyModelType::TTP},
-  {"ttp", ElectrophysiologyModelType::TTP}
-};
+  static const std::map<std::string, std::string> aliases = {
+    {"aliev-panfilov", "AP"},
+    {"ap", "AP"},
+    {"bueno-orovio", "BO"},
+    {"bo", "BO"},
+    {"fitzhugh-nagumo", "FN"},
+    {"fn", "FN"},
+    {"tentusscher-panfilov", "TTP"},
+    {"ttp", "TTP"}
+  };
+
+  auto name = input;
+  std::transform(name.begin(), name.end(), name.begin(),
+      [](unsigned char c) { return std::tolower(c); });
+  const auto it = aliases.find(name);
+  if (it == aliases.end()) {
+    svmp::raise<svmp::ParseException>(
+        "Unknown Electrophysiology_model '" + input +
+        "'. Expected AP (Aliev-Panfilov), BO (Bueno-Orovio), "
+        "FN (FitzHugh-Nagumo), or TTP (tenTusscher-Panfilov).");
+  }
+  return it->second;
+}
 
 bool stimType::is_active(const double time) const
 {

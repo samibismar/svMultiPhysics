@@ -291,7 +291,7 @@ void cep_integ_l(CepMod &cep_mod, cepModelType &cep, Vector<double> &X,
 #ifdef debug_cep_integ_l
   dmsg << "nt: " << nt;
   dmsg << "Ksac: " << Ksac;
-  dmsg << "cep.cepType: " << cep.cepType;
+  dmsg << "cep.ionic_model_name: " << cep.ionic_model_name;
   dmsg << "cep.odes.tIntTyp: " << cep.odes.tIntType;
 #endif
 

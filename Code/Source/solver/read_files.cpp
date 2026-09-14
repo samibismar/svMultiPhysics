@@ -1236,24 +1236,12 @@ void read_bf(ComMod& com_mod, BodyForceParameters* bf_params, bfType& lBf)
 //
 void read_cep_domain(Simulation* simulation, EquationParameters* eq_params, DomainParameters* domain_params, dmnType& lDmn)
 { 
-  auto model_str = domain_params->electrophysiology_model.value();
-  std::transform(model_str.begin(), model_str.end(), model_str.begin(), ::tolower);
-
-  // Get the type of electrophysiology model.
-  //
-  ElectrophysiologyModelType model_type;
-
-  try {
-    model_type = cep_model_name_to_type.at(model_str);
-  } catch (const std::out_of_range& exception) {
-    throw std::runtime_error("[read_cep_domain] Unknown model type '" + model_str + "'.");
-  }
-
-  lDmn.cep.cepType = model_type;
+  lDmn.cep.ionic_model_name =
+      canonical_ionic_model_name(domain_params->electrophysiology_model.value());
 
   // Setup the ionic models.
   {
-    const std::string model_name = cep_model_type_to_name.at(model_type);
+    const auto& model_name = lDmn.cep.ionic_model_name;
 
     lDmn.cep.ionic_model = IonicModelFactory::create(model_name);
     lDmn.cep.ionic_model->read_parameters(

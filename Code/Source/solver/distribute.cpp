@@ -1529,12 +1529,11 @@ void dist_eq(ComMod& com_mod, const CmMod& cm_mod, const cmType& cm, const std::
 
     if (dmn.phys == EquationType::phys_CEP) {
       auto& cep = dmn.cep;
-      cm.bcast_enum(cm_mod, &cep.cepType);
+      cm.bcast(cm_mod, cep.ionic_model_name);
 
       // All ranks but the master need to allocate the ionic model instance.
       if (!cm.mas(cm_mod)) {
-        cep.ionic_model =
-            IonicModelFactory::create(cep_model_type_to_name.at(cep.cepType));
+        cep.ionic_model = IonicModelFactory::create(cep.ionic_model_name);
       }
 
       cm.bcast(cm_mod, &cep.nX);
