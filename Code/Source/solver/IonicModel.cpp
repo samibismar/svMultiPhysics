@@ -7,7 +7,9 @@
 #include "Parameters.h"
 #include "mat_fun.h"
 
+#include <cmath>
 #include <iostream>
+#include <unordered_set>
 
 const std::map<std::string, TimeIntegrationType> cep_time_int_to_type = {
     {"cn", TimeIntegrationType::CN2},
@@ -54,6 +56,89 @@ void IonicModel::init(Vector<double> &X, Vector<double> &Xg) const {
 
   for (size_t i = 0; i < initial_Xg.size(); ++i)
     Xg[i] = initial_Xg[i].second;
+}
+
+void IonicModel::initialize_state(
+    int rank_node_count, const std::vector<int> &rank_local_nodes) {
+  svmp::throw_if<svmp::FE::InvalidArgumentException>(
+      rank_node_count < 0, "Rank node count must be non-negative.");
+
+  std::unordered_set<int> seen_nodes;
+  for (const int node : rank_local_nodes) {
+    svmp::check_index(node, rank_node_count);
+    svmp::throw_if<svmp::FE::InvalidArgumentException>(
+        !seen_nodes.insert(node).second,
+        "Duplicate ionic model node index " + std::to_string(node) + ".");
+  }
+
+  Vector<double> X(nX());
+  Vector<double> Xg(nG());
+  init(X, Xg);
+
+  node_indices = rank_local_nodes;
+
+  // A zero-size Array::resize does not release the previous allocation.
+  states.clear();
+  gating_states.clear();
+  states.resize(nX(), node_indices.size());
+  gating_states.resize(nG(), node_indices.size());
+
+  for (int column = 0; column < node_indices.size(); ++column) {
+    for (unsigned int row = 0; row < nX(); ++row)
+      states(row, column) = X(row);
+    for (unsigned int row = 0; row < nG(); ++row)
+      gating_states(row, column) = Xg(row);
+  }
+}
+
+void IonicModel::advance_time_step(
+    const odeType &ode_solver_params, const int zone_id, const double start_time,
+    const double duration, const double ionic_dt, const double stretch_coefficient,
+    const Array<double> &coordinates, const Vector<double> &I4f,
+    const std::function<double(double, const Vector<double> &)> &stimulus_value) {
+  if (node_indices.empty())
+    return;
+
+  for (const int node : node_indices) {
+    svmp::check_index(node, coordinates.ncols());
+    svmp::check_index(node, I4f.size());
+  }
+
+  const unsigned int nt = static_cast<unsigned int>(duration / ionic_dt);
+  svmp::throw_if<svmp::FE::InvalidArgumentException>(
+      nt > 0 && !stimulus_value, "Ionic stimulus evaluator is empty.");
+
+  Vector<double> X(nX());
+  Vector<double> Xg(nG());
+  for (size_t column = 0; column < node_indices.size(); ++column) {
+    const int node = node_indices[column];
+    const Vector<double> x = coordinates.col(node);
+    const double Ksac = I4f[node] > 1.0
+                            ? stretch_coefficient * (std::sqrt(I4f[node]) - 1.0)
+                            : 0.0;
+
+    for (unsigned int row = 0; row < nX(); ++row)
+      X[row] = states(row, column);
+    for (unsigned int row = 0; row < nG(); ++row)
+      Xg[row] = gating_states(row, column);
+
+    for (unsigned int i = 0; i < nt; ++i) {
+      const double t = start_time + i * ionic_dt;
+      const double Istim = stimulus_value(t, x);
+      integ(ode_solver_params, zone_id, t, ionic_dt, Istim, Ksac, X, Xg);
+    }
+
+    if (std::isnan(X[0])) {
+      svmp::raise<svmp::FE::FEException>(
+          "A NaN voltage was computed at rank-local node " + std::to_string(node) +
+          " (ionic state column " + std::to_string(column) + ").");
+    }
+
+    for (unsigned int row = 0; row < nX(); ++row)
+      states(row, column) = X[row];
+    for (unsigned int row = 0; row < nG(); ++row)
+      gating_states(row, column) = Xg[row];
+  }
 }
 
 void IonicModel::integ(const odeType &ode_solver_params, const int zone_id,

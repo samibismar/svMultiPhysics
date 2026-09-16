@@ -10,6 +10,7 @@
 
 #include "FE/Common/FEException.h"
 
+#include <functional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -180,6 +181,72 @@ public:
    * @param[out] Xg Vector of gating variables to be initialized.
    */
   void init(Vector<double> &X, Vector<double> &Xg) const;
+
+  /**
+   * @brief Allocate and reset the nodal ionic state.
+   *
+   * Copies the node list in the supplied order. Every call replaces the
+   * previous participation and initializes each column using @ref init with
+   * the currently configured initial conditions. Empty participation releases
+   * the previous state storage.
+   *
+   * @param[in] rank_node_count Total number of solver nodes on this rank.
+   * @param[in] rank_local_nodes Unique rank-local solver indices in
+   *   [0, rank_node_count), not global mesh IDs. The list may be empty.
+   * @throws svmp::FE::InvalidArgumentException for a negative rank node count
+   *   or duplicate node indices.
+   * @throws svmp::IndexOutOfRangeException for an out-of-range node index.
+   */
+  void initialize_state(int rank_node_count,
+                        const std::vector<int> &rank_local_nodes);
+
+  /// Map state columns to rank-local solver nodes, in initialization order.
+  /// The list is empty on construction and replaced by initialize_state().
+  const std::vector<int> &get_node_indices() const { return node_indices; }
+
+  /**
+   * @brief Advance the owned state at each participating node.
+   *
+   * State column c uses coordinates and I4f at node_indices[c]. Nodes are
+   * advanced in that list's order. Empty participation is a no-op, including
+   * before initialize_state() has been called.
+   *
+   * Each node takes static_cast<unsigned int>(duration / ionic_dt) substeps;
+   * any remainder is discarded. Substep i samples stimulus_value at
+   * start_time + i * ionic_dt, then calls @ref integ without changing its
+   * scaling or integration scheme. The final voltage is checked for NaN even
+   * when there are zero substeps.
+   *
+   * @param[in] ode_solver_params Settings passed to @ref integ.
+   * @param[in] zone_id Passed unchanged to @ref integ; must satisfy the selected
+   *   model's requirements (1--3 for BuenoOrovio and TTP; ignored by AP and FN).
+   * @param[in] start_time Beginning of the interval, in the units used by integ.
+   * @param[in] duration Interval length in the same units as start_time.
+   * @param[in] ionic_dt Ionic substep size in the same units as duration.
+   * @param[in] stretch_coefficient Multiplier in the per-node coefficient
+   *   I4f > 1 ? stretch_coefficient * (sqrt(I4f) - 1) : 0, passed to integ.
+   * @param[in] coordinates Coordinate columns indexed by rank-local node.
+   * @param[in] I4f Stretch-feedback input indexed by rank-local node.
+   * @param[in] stimulus_value Evaluator of stimulus current at a time and node
+   *   coordinates. It is not retained; use a callback returning zero for no
+   *   stimulus.
+   * @pre For nonempty participation, times are finite, duration >= 0,
+   *   ionic_dt > 0, and the finite quotient duration / ionic_dt truncates to
+   *   a value representable as unsigned int. Inputs use the initialization
+   *   list's rank-local numbering; coordinate dimension and physical inputs
+   *   satisfy the stimulus evaluator and model requirements.
+   * @throws svmp::IndexOutOfRangeException if a participating node is outside
+   *   either nodal input. All node indices are checked before any advance.
+   * @throws svmp::FE::InvalidArgumentException if stimulus_value is empty and
+   *   at least one substep will run. Exceptions from integ or the callback
+   *   propagate; earlier nodes may already have advanced.
+   * @throws svmp::FE::FEException if a node's final voltage is NaN.
+   */
+  void advance_time_step(
+      const odeType &ode_solver_params, int zone_id, double start_time,
+      double duration, double ionic_dt, double stretch_coefficient,
+      const Array<double> &coordinates, const Vector<double> &I4f,
+      const std::function<double(double, const Vector<double> &)> &stimulus_value);
 
   /**
    * @brief Integrate over one time step.
@@ -444,6 +511,15 @@ protected:
   /**
    * @}
    */
+
+private:
+  std::vector<int> node_indices;
+
+  /// Ordinary variables: nX() rows, one column per node_indices entry.
+  Array<double> states;
+
+  /// Gating variables: nG() rows, with the same column ordering as states.
+  Array<double> gating_states;
 };
 
 /**
