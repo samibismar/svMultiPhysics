@@ -5,6 +5,7 @@
 // desined to interface with user.
 
 #include "output.h"
+#include "cep_ion.h"
 #include "utils.h"
 
 #include <cstdio>
@@ -232,7 +233,6 @@ void write_restart(Simulation* simulation, std::array<double,3>& timeP, const So
   auto& cplBC = com_mod.cplBC;
   auto& Ad = com_mod.Ad;
   auto& pS0 = com_mod.pS0;
-  auto& Xion = cep_mod.Xion;
   auto& cem = cep_mod.cem;
 
   #ifdef debug_write_restart
@@ -310,7 +310,7 @@ void write_restart(Simulation* simulation, std::array<double,3>& timeP, const So
 
         } else if (cepEq) {
           restart_file.write((char*)Ad.data(), Ad.msize());
-          restart_file.write((char*)Xion.data(), Xion.msize());
+          cep_ion::write_restart(com_mod, restart_file);
           restart_file.write((char*)cem.Ya_f.data(), cem.Ya_f.msize());
           restart_file.write((char*)cem.Ya_s.data(), cem.Ya_s.msize());
           restart_file.write((char*)cem.Ya_n.data(), cem.Ya_n.msize());
@@ -335,7 +335,7 @@ void write_restart(Simulation* simulation, std::array<double,3>& timeP, const So
           restart_file.write((char*)pS0.data(), pS0.msize());
 
         } else if (cepEq) {
-          restart_file.write((char*)Xion.data(), Xion.msize());
+          cep_ion::write_restart(com_mod, restart_file);
           restart_file.write((char*)cem.Ya_f.data(), cem.Ya_f.msize());
           restart_file.write((char*)cem.Ya_s.data(), cem.Ya_s.msize());
           restart_file.write((char*)cem.Ya_n.data(), cem.Ya_n.msize());
@@ -352,7 +352,7 @@ void write_restart(Simulation* simulation, std::array<double,3>& timeP, const So
 
     } else {
       if (cepEq) {
-        restart_file.write((char*)Xion.data(), Xion.msize());
+        cep_ion::write_restart(com_mod, restart_file);
 
       } else if (risFlag) {
         write_ris_data(com_mod, restart_file);

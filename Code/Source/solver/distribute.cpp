@@ -373,7 +373,6 @@ void distribute(Simulation* simulation)
     }
 
     cm.bcast(cm_mod, &com_mod.ibFlag);
-    cm.bcast(cm_mod, &simulation->cep_mod.nXion);
   }  
 
   // Distributing X to processors
@@ -1536,8 +1535,6 @@ void dist_eq(ComMod& com_mod, const CmMod& cm_mod, const cmType& cm, const std::
         cep.ionic_model = IonicModelFactory::create(cep.ionic_model_name);
       }
 
-      cm.bcast(cm_mod, &cep.nX);
-      cm.bcast(cm_mod, &cep.nG);
       cm.bcast(cm_mod, &cep.nFn);
       cm.bcast(cm_mod, &cep.imyo);
       cm.bcast(cm_mod, &cep.dt);

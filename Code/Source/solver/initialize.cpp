@@ -105,7 +105,6 @@ void init_from_bin(Simulation* simulation, const std::string& fName, std::array<
   auto& Ad = com_mod.Ad;
   // Ao, Do, Yo now passed as parameters
   auto& pS0 = com_mod.pS0;
-  auto& Xion = cep_mod.Xion;
 
   output::read_restart_header(com_mod, tStamp, timeP[0], bin_file);
   bin_file.read((char*)cplBC.xo.data(), cplBC.xo.msize());
@@ -127,7 +126,7 @@ void init_from_bin(Simulation* simulation, const std::string& fName, std::array<
 
         } else if (cepEq) {
           bin_file.read((char*)Ad.data(), Ad.msize());
-          bin_file.read((char*)Xion.data(), Xion.msize());
+          cep_ion::read_restart(com_mod, bin_file);
           bin_file.read((char*)cem.Ya_f.data(), cem.Ya_f.msize());
           bin_file.read((char*)cem.Ya_s.data(), cem.Ya_s.msize());
           bin_file.read((char*)cem.Ya_n.data(), cem.Ya_n.msize());
@@ -150,7 +149,7 @@ void init_from_bin(Simulation* simulation, const std::string& fName, std::array<
           bin_file.read((char*)pS0.data(), pS0.msize());
 
         } else if (cepEq) {
-          bin_file.read((char*)Xion.data(), Xion.msize());
+          cep_ion::read_restart(com_mod, bin_file);
           bin_file.read((char*)cem.Ya_f.data(), cem.Ya_f.msize());
           bin_file.read((char*)cem.Ya_s.data(), cem.Ya_s.msize());
           bin_file.read((char*)cem.Ya_n.data(), cem.Ya_n.msize());
@@ -169,7 +168,7 @@ void init_from_bin(Simulation* simulation, const std::string& fName, std::array<
     } else {
 
       if (cepEq) {
-        bin_file.read((char*)Xion.data(), Xion.msize());
+        cep_ion::read_restart(com_mod, bin_file);
 
       } else if (risFlag) {
         init_ris_data(com_mod, bin_file); 
@@ -238,6 +237,13 @@ void init_from_bin(Simulation* simulation, const std::string& fName, std::array<
 
   int i = 0;
   cm.bcast(cm_mod, &i);
+
+  // Calcium is derived from restored histories, not stored back into them.
+  if (cepEq && !ibFlag && !pstEq) {
+    for (const auto &eq : com_mod.eq)
+      if (eq.phys == consts::EquationType::phys_CEP)
+        cep_mod.calcium = cep_ion::assemble_calcium(com_mod, eq);
+  }
 
   #ifdef debug_init_from_bin 
   dmsg << "cTS: " << com_mod.cTS; 
@@ -534,36 +540,6 @@ void initialize(Simulation* simulation, Vector<double>& timeP)
 
   com_mod.stamp = {cm.np(), com_mod.nEq, com_mod.nMsh, com_mod.tnNo, i, tDof, ierr};
 
-  // Calculating the record length
-  //
-
-  i = 2*tDof;
-  if (dFlag) i = 3*tDof;
-  if (com_mod.pstEq) i = i + com_mod.nsymd;
-  if (com_mod.sstEq) i = i + nsd;
-  if (cep_mod.cepEq) {
-    i = i + cep_mod.nXion;
-    if (cep_mod.cem.cpld) i = i + 1;
-  }
-  if (com_mod.risFlag) {
-    i = i + com_mod.ris.nbrRIS;
-  }
-  if (com_mod.urisFlag) {
-    i = i + com_mod.nUris * 2;
-  }
-
-  i = sizeof(int)*(1+com_mod.stamp.size()) + sizeof(double)*(2 + com_mod.nEq + com_mod.cplBC.nX + i*com_mod.tnNo);
-
-  if (com_mod.ibFlag) {
-    i = i + sizeof(double)*(3*nsd + 1) * com_mod.ib.tnNo;
-  }
-
-  if (cm.seq()) {
-    recLn = i;
-  } else { 
-    MPI_Allreduce(&i, &recLn, 1, cm_mod::mpint, MPI_MAX, cm.com());
-  }
-
   // Initialize shell eIEN data structure. Used later in LHSA.
   //
 
@@ -696,7 +672,6 @@ void initialize(Simulation* simulation, Vector<double>& timeP)
   // Electrophysiology
   //
   if (cep_mod.cepEq) {
-    cep_mod.Xion.resize(cep_mod.nXion,tnNo);
     cep_ion::cep_init(simulation, initial_solutions);
   }
 
@@ -710,6 +685,40 @@ void initialize(Simulation* simulation, Vector<double>& timeP)
     cep_mod.cem.Ya_f.resize(tnNo);
     cep_mod.cem.Ya_s.resize(tnNo);
     cep_mod.cem.Ya_n.resize(tnNo);
+  }
+
+  // Calculate record length after initializing compact ionic participation.
+
+  i = 2*tDof;
+  if (dFlag) i = 3*tDof;
+  if (com_mod.pstEq) i = i + com_mod.nsymd;
+  if (com_mod.sstEq) i = i + nsd;
+  if (com_mod.risFlag) {
+    i = i + com_mod.ris.nbrRIS;
+  }
+  if (com_mod.urisFlag) {
+    i = i + com_mod.nUris * 2;
+  }
+
+  i = sizeof(int)*(1+com_mod.stamp.size()) + sizeof(double)*(2 + com_mod.nEq + com_mod.cplBC.nX + i*com_mod.tnNo);
+
+  if (com_mod.ibFlag) {
+    i = i + sizeof(double)*(3*nsd + 1) * com_mod.ib.tnNo;
+  }
+
+  if (cep_mod.cepEq && !com_mod.ibFlag && !com_mod.pstEq) {
+    i += cep_ion::restart_size(com_mod);
+    if (dFlag) {
+      // Match the three activation vectors written after the ionic payload.
+      i += cep_mod.cem.Ya_f.msize() + cep_mod.cem.Ya_s.msize() +
+           cep_mod.cem.Ya_n.msize();
+    }
+  }
+
+  if (cm.seq()) {
+    recLn = i;
+  } else {
+    MPI_Allreduce(&i, &recLn, 1, cm_mod::mpint, MPI_MAX, cm.com());
   }
 
   // Setup the initial conditions for the active stress models.
@@ -1016,4 +1025,3 @@ void zero_init(Simulation* simulation, SolutionStates& solutions)
      }
   }
 }
-

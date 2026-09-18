@@ -128,12 +128,6 @@ class cepModelType
     /// @brief Canonical ionic model factory name; empty before input is read.
     std::string ionic_model_name;
 
-    /// @brief Number of state variables
-    int nX = 0;
-
-    /// @brief Number of gating variables
-    int nG = 0;
-
     /// @brief  Number of fiber directions
     int nFn = 0;
 
@@ -202,12 +196,6 @@ class CepMod
 
     /// @brief Whether cardiac electrophysiology is solved
     bool cepEq;
-
-    /// @brief Max. dof in cellular activation model
-    int nXion = 0;
-
-    /// @brief Unknowns stored at all nodes
-    Array<double> Xion;
 
     /// @brief Calcium vector at all nodes.
     Vector<double> calcium;

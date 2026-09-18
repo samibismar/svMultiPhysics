@@ -91,6 +91,48 @@ void IonicModel::initialize_state(
   }
 }
 
+void IonicModel::set_voltage(const Vector<double> &rank_local_voltage) {
+  for (const int node : node_indices)
+    svmp::check_index(node, rank_local_voltage.size());
+
+  for (size_t column = 0; column < node_indices.size(); ++column)
+    states(0, column) = rank_local_voltage[node_indices[column]];
+}
+
+double IonicModel::state_value(unsigned int state_index,
+                               std::size_t column) const {
+  svmp::check_index(state_index, nX());
+  svmp::check_index(column, node_indices.size());
+  return states(state_index, column);
+}
+
+void IonicModel::write_state(std::ostream &stream) const {
+  if (states.size() != 0)
+    stream.write(reinterpret_cast<const char *>(states.data()), states.msize());
+  if (gating_states.size() != 0)
+    stream.write(reinterpret_cast<const char *>(gating_states.data()),
+                 gating_states.msize());
+  svmp::check<svmp::CoreException>(
+      static_cast<bool>(stream), "Could not write ionic model state.",
+      svmp::StatusCode::IOError);
+}
+
+void IonicModel::read_state(std::istream &stream) {
+  Array<double> restored_states(nX(), node_indices.size());
+  Array<double> restored_gates(nG(), node_indices.size());
+  if (restored_states.size() != 0)
+    stream.read(reinterpret_cast<char *>(restored_states.data()),
+                restored_states.msize());
+  if (restored_gates.size() != 0)
+    stream.read(reinterpret_cast<char *>(restored_gates.data()),
+                restored_gates.msize());
+  svmp::check<svmp::CoreException>(
+      static_cast<bool>(stream), "Could not read ionic model state.",
+      svmp::StatusCode::IOError);
+  states = restored_states;
+  gating_states = restored_gates;
+}
+
 void IonicModel::advance_time_step(
     const odeType &ode_solver_params, const int zone_id, const double start_time,
     const double duration, const double ionic_dt, const double stretch_coefficient,

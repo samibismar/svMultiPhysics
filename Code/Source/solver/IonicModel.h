@@ -10,7 +10,9 @@
 
 #include "FE/Common/FEException.h"
 
+#include <cstddef>
 #include <functional>
+#include <iosfwd>
 #include <string>
 #include <utility>
 #include <vector>
@@ -203,6 +205,27 @@ public:
   /// Map state columns to rank-local solver nodes, in initialization order.
   /// The list is empty on construction and replaced by initialize_state().
   const std::vector<int> &get_node_indices() const { return node_indices; }
+
+  /// Copy rank-local voltage into state row 0 at participating nodes only.
+  /// All node indices are checked before any state is changed.
+  /// @throws svmp::IndexOutOfRangeException if an input node is missing.
+  void set_voltage(const Vector<double> &rank_local_voltage);
+
+  /// Read an ordinary state at a compact model-local column (not a node ID).
+  /// @throws svmp::IndexOutOfRangeException for an invalid row or column.
+  double state_value(unsigned int state_index, std::size_t column) const;
+
+  /// Write ordinary states, then gates, as native binary doubles. Each array
+  /// is column-major, in get_node_indices() order; empty arrays write no bytes.
+  /// No sizes or node IDs are written. The reading run must use the layout,
+  /// model configuration, and MPI partition used by the writing run.
+  /// @throws svmp::CoreException with IOError status on a failed write.
+  void write_state(std::ostream &stream) const;
+
+  /// Restore the write_state() layout without changing participation. Both
+  /// arrays are read before replacing the current state.
+  /// @throws svmp::CoreException with IOError status on a failed read.
+  void read_state(std::istream &stream);
 
   /**
    * @brief Advance the owned state at each participating node.

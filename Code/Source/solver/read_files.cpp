@@ -1246,17 +1246,9 @@ void read_cep_domain(Simulation* simulation, EquationParameters* eq_params, Doma
     lDmn.cep.ionic_model = IonicModelFactory::create(model_name);
     lDmn.cep.ionic_model->read_parameters(
         *domain_params->ionic_models.at(model_name));
-
-    // Set model parameters based on the instantiated ionic model.
-    lDmn.cep.nX = lDmn.cep.ionic_model->nX();
-    lDmn.cep.nG = lDmn.cep.ionic_model->nG();
   }
 
-  // Set the maximum number of dof for cellular activation model.
   auto& cep_mod = simulation->get_cep_mod();
-  if (cep_mod.nXion < lDmn.cep.nX + lDmn.cep.nG) {
-    cep_mod.nXion = lDmn.cep.nX + lDmn.cep.nG;
-  } 
 
   // Set conductivity.
   lDmn.cep.Diso = domain_params->isotropic_conductivity();
@@ -2417,6 +2409,7 @@ void read_outputs(Simulation* simulation, EquationParameters* eq_params, eqType&
       }
 
     if (output_ionic_vars) {
+      std::set<std::string> registered_names;
       for (const auto &dmn : lEq.dmn) {
         if (dmn.phys != consts::EquationType::phys_CEP)
           continue;
@@ -2426,9 +2419,12 @@ void read_outputs(Simulation* simulation, EquationParameters* eq_params, eqType&
 
         const auto registered_outputs =
             dmn.cep.ionic_model->get_registered_outputs();
-        lEq.output.insert(lEq.output.end(), registered_outputs.begin(),
-                          registered_outputs.end());
-        lEq.nOutput += registered_outputs.size();
+        for (const auto &out : registered_outputs) {
+          if (registered_names.insert(out.name).second) {
+            lEq.output.push_back(out);
+            ++lEq.nOutput;
+          }
+        }
       }
     }
   }

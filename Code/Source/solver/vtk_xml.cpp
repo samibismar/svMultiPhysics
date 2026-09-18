@@ -8,6 +8,7 @@
 #include "VtkData.h"
 
 #include "all_fun.h"
+#include "cep_ion.h"
 #include "consts.h"
 #include "post.h"
 
@@ -1023,6 +1024,17 @@ void write_vtus(Simulation* simulation, const SolutionStates& solutions, const b
   std::vector<int> outS(nOut+1); 
   std::vector<std::string>outNamesE(nOute);
 
+  std::vector<std::map<std::string, Vector<double>>> ionic_outputs(nEq);
+  for (int iEq = 0; iEq < nEq; ++iEq) {
+    const auto &eq = eqs[iEq];
+    for (const auto &out : eq.output) {
+      if (out.options.spatial && out.grp == OutputNameType::outGrp_ionicState) {
+        ionic_outputs[iEq][out.name] =
+            cep_ion::assemble_output(com_mod, eq, out.name);
+      }
+    }
+  }
+
   // Prepare all solultions in to dataType d
   //
   std::vector<dataType> d(nMsh);
@@ -1145,7 +1157,7 @@ void write_vtus(Simulation* simulation, const SolutionStates& solutions, const b
           case OutputNameType::outGrp_ionicState:
             for (int a = 0; a < msh.nNo; a++) {
               int Ac = msh.gN(a);
-              d[iM].x(is, a) = cep_mod.Xion(eq.output[iOut].o, Ac);
+              d[iM].x(is, a) = ionic_outputs[iEq].at(eq.output[iOut].name)[Ac];
             }
             break;
 

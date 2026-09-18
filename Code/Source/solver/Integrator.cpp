@@ -770,7 +770,7 @@ void Integrator::initiator(SolutionStates& solutions)
 ///   solutions_.current.A
 ///   solutions_.current.D
 ///   solutions_.current.Y
-///   cep_mod.Xion
+///   CEP domain models: membrane potential
 ///   com_mod.pS0
 ///   com_mod.pSa
 ///   com_mod.pSn
@@ -811,7 +811,6 @@ void Integrator::corrector()
   auto& pS0 = com_mod.pS0;
   auto& pSa = com_mod.pSa;
   auto& pSn = com_mod.pSn;
-  auto& Xion = cep_mod.Xion;
 
   int s = eq.s;
   int e = eq.e;
@@ -907,13 +906,9 @@ void Integrator::corrector()
     }
   }
 
-  // Update Xion for cardiac electrophysiology
-  //
+  // Supply the corrected voltage without changing internal ionic histories.
   if (eq.phys == Equation_CEP) {
-    int s = eq.s;
-    for (int a = 0; a < tnNo; a++) {
-      Xion(0,a) = Yn(s,a);
-    }
+    cep_ion::set_voltage(eq, Yn.row(eq.s));
   }
 
   // Update prestress at the nodes and re-initialize

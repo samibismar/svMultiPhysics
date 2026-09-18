@@ -1201,13 +1201,14 @@ Modifies:
 
  Modifies
  ```
- cep_mod.Xion
+ CEP domain models: independent ordinary states and gates
+ Initial solution: averaged membrane potential
  ```
- 
- - `IonicModel::init(Xl, Xgl)`
- 
- - `all_fun::commu(com_mod, sA)`
- - `all_fun::commu(com_mod, sF)`
+
+ - `IonicModel::initialize_state(tnNo, nodes)` allocates compact storage in
+   ascending rank-local node order.
+ - Voltage is averaged across participating domains and MPI copies, then
+   supplied to the models and initial solution. Other states are not averaged.
  
 <!-- ==================== -->
 <!--     init_fs_msh      -->
