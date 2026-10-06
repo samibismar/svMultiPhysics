@@ -34,6 +34,15 @@ void set_bc_dir_w(ComMod& com_mod, const SolutionStates& solutions);
 void set_bc_dir_wl(ComMod& com_mod, const bcType& lBc, const mshType& lM, const faceType& lFa, const SolutionStates& solutions);
 
 void set_bc_neu(ComMod& com_mod, const CmMod& cm_mod, const SolutionStates& solutions);
+
+/// @brief Cache basal element loads from old displacement and prescribed pressure
+/// at evaluation_time, using initialized bc.gx. Call before the predictor for com_mod.cTS.
+void prepare_energy_balance(ComMod& com_mod, const CmMod& cm_mod,
+    const SolutionStates& solutions, double evaluation_time);
+
+/// @brief Assemble the cached physical load with residual sign minus and zero tangent.
+void assemble_energy_balance(ComMod& com_mod, const bcType& bc);
+
 void set_bc_neu_l(ComMod& com_mod, const CmMod& cm_mod, const bcType& lBc, const faceType& lFa, const SolutionStates& solutions);
 
 void set_bc_rbnl(ComMod& com_mod, const faceType& lFa, const RobinBoundaryCondition& robin_bc,
