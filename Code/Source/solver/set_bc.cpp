@@ -17,6 +17,9 @@
 #include "svZeroD_interface.h"
 #include "solid/ustruct.h"
 #include "utils.h"
+#include "Core/Exception.h"
+#include "FE/Common/FEException.h"
+#include <cmath>
 #include <cstdio>
 #include <math.h>
 
@@ -1467,6 +1470,109 @@ void set_bc_dir_wl(ComMod& com_mod, const bcType& lBc, const mshType& lM, const 
   }
 }
 
+void prepare_energy_balance(ComMod& com_mod, const CmMod& cm_mod,
+    const SolutionStates& solutions, double evaluation_time)
+{
+  using namespace consts;
+  auto& cm = com_mod.cm;
+  for (auto& eq : com_mod.eq) {
+    for (auto& bc : eq.bc) {
+      if (bc.energy_balance_face < 0) { continue; }
+      const auto& endo = com_mod.msh[bc.iM].fa[bc.iFa];
+      const auto& base = com_mod.msh[bc.iM].fa[bc.energy_balance_face];
+      const double pressure = utils::btest(bc.bType, iBC_std)
+          ? bc.g : bc.gt.value(evaluation_time)(0);
+
+      // Match set_bc_neu_l's nodal pressure field; gx includes profile initialization.
+      Vector<double> nodal_pressure(com_mod.tnNo);
+      for (int a = 0; a < endo.nNo; ++a) {
+        nodal_pressure(endo.gN(a)) = pressure * bc.gx(a);
+      }
+
+      Vector<double> resultant(com_mod.nsd);
+      for (int e = 0; e < endo.nEl; ++e) {
+        for (int g = 0; g < endo.nG; ++g) {
+          double pressure_g = 0.0;
+          for (int a = 0; a < endo.eNoN; ++a) {
+            pressure_g += endo.N(a, g) * nodal_pressure(endo.IEN(a, e));
+          }
+          const auto normal = nn::gnnb(com_mod, endo, e, g, endo.Nx.slice(g),
+              solutions, MechanicalConfigurationType::old_timestep, eq.s);
+          for (int i = 0; i < com_mod.nsd; ++i) {
+            resultant(i) += endo.w(g) * pressure_g * normal(i);
+          }
+        }
+      }
+
+      bc.energy_balance_load.resize(com_mod.nsd, base.eNoN, base.nEl);
+      bc.energy_balance_load = 0.0;
+      double area = 0.0;
+      for (int e = 0; e < base.nEl; ++e) {
+        for (int g = 0; g < base.nG; ++g) {
+          const auto normal = nn::gnnb(com_mod, base, e, g, base.Nx.slice(g),
+              solutions, MechanicalConfigurationType::old_timestep, eq.s);
+          const double weight = base.w(g) * utils::norm(normal);
+          area += weight;
+          for (int a = 0; a < base.eNoN; ++a) {
+            for (int i = 0; i < com_mod.nsd; ++i) {
+              bc.energy_balance_load(i, a, e) += weight * base.N(a, g);
+            }
+          }
+        }
+      }
+      resultant = cm.reduce(cm_mod, resultant);
+      area = cm.reduce(cm_mod, area);
+      // Validate after both reductions, including on ranks with no face elements.
+      bool invalid = !std::isfinite(pressure) || !std::isfinite(area) || area <= 0.0;
+      Vector<double> traction(com_mod.nsd);
+      if (!invalid) {
+        for (int i = 0; i < com_mod.nsd; ++i) {
+          traction(i) = resultant(i) / area;
+          invalid |= !std::isfinite(resultant(i)) || !std::isfinite(traction(i));
+        }
+      }
+      svmp::throw_if<svmp::FE::InvalidArgumentException>(invalid,
+          "Energy_balance_face '" + base.name + "': invalid pressure, resultant or basal area.");
+      for (int e = 0; e < base.nEl; ++e) {
+        for (int a = 0; a < base.eNoN; ++a) {
+          for (int i = 0; i < com_mod.nsd; ++i) {
+            bc.energy_balance_load(i, a, e) *= traction(i);
+          }
+        }
+      }
+      bc.energy_balance_step = com_mod.cTS;
+    }
+  }
+}
+
+void assemble_energy_balance(ComMod& com_mod, const bcType& bc)
+{
+  if (bc.energy_balance_face < 0) { return; }
+  const auto& face = com_mod.msh[bc.iM].fa[bc.energy_balance_face];
+  auto& eq = com_mod.eq[com_mod.cEq];
+  svmp::throw_if<svmp::InternalErrorException>(
+      bc.energy_balance_step != com_mod.cTS ||
+      bc.energy_balance_load.nrows() != com_mod.nsd ||
+      bc.energy_balance_load.ncols() != face.eNoN ||
+      bc.energy_balance_load.nslices() != face.nEl,
+      "Energy_balance_face '" + face.name + "': load was not prepared for this timestep.");
+
+  Vector<int> nodes(face.eNoN);
+  Array<double> residual(eq.dof, face.eNoN);
+  Array3<double> tangent(eq.dof * eq.dof, face.eNoN, face.eNoN);
+  tangent = 0.0;
+  for (int e = 0; e < face.nEl; ++e) {
+    residual = 0.0;
+    for (int a = 0; a < face.eNoN; ++a) {
+      nodes(a) = face.IEN(a, e);
+      for (int i = 0; i < com_mod.nsd; ++i) {
+        residual(i, a) = -bc.energy_balance_load(i, a, e);
+      }
+    }
+    eq.linear_algebra->assemble(com_mod, face.eNoN, nodes, tangent, residual);
+  }
+}
+
 /// @brief Set outlet BCs.
 //
 void set_bc_neu(ComMod& com_mod, const CmMod& cm_mod, const SolutionStates& solutions)
@@ -1509,6 +1615,7 @@ void set_bc_neu(ComMod& com_mod, const CmMod& cm_mod, const SolutionStates& solu
       dmsg << "name: " << com_mod.msh[iM].fa[iFa].name;
       #endif
       set_bc_neu_l(com_mod, cm_mod, bc, com_mod.msh[iM].fa[iFa], solutions);
+      assemble_energy_balance(com_mod, bc);
 
     } else if (utils::btest(bc.bType,iBC_trac)) { 
       set_bc_trac_l(com_mod, cm_mod, bc, com_mod.msh[iM].fa[iFa], solutions);

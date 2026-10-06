@@ -119,6 +119,14 @@ class bcType
     // The mesh index that corresponds to this BC
     int iM = -1;
 
+    // Basal material face in mesh iM; -1 disables pressure balancing.
+    int energy_balance_face = -1;
+
+    // Physical nodal forces (component, face node, local face element),
+    // evaluated from the accepted state and held fixed for energy_balance_step.
+    Array3<double> energy_balance_load;
+    int energy_balance_step = -1;
+
     // Pointer to FSILS%bc
     int lsPtr = -1;
 

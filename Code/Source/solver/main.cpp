@@ -291,6 +291,7 @@ void iterate_solution(Simulation* simulation)
     // Incrementing time step, hence cTS will be associated with new
     // variables, i.e. An, Yn, and Dn
     //
+    const double accepted_time = time;
     cTS = cTS + 1;
     time = time + dt;
     cEq = 0;
@@ -321,6 +322,8 @@ void iterate_solution(Simulation* simulation)
         break;
       }
     }
+
+    set_bc::prepare_energy_balance(com_mod, cm_mod, solutions, accepted_time);
 
     // Predictor step
     #ifdef debug_iterate_solution

@@ -868,6 +868,7 @@ class BoundaryConditionParameters : public ParameterLists
     Parameter<double> damping;
     Parameter<double> distal_pressure;
     VectorParameter<int> effective_direction;
+    Parameter<std::string> energy_balance_face;
     Parameter<bool> follower_pressure_load;
     Parameter<std::string> fourier_coefficients_file_path;
 

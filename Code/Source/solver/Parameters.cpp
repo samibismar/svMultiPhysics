@@ -546,6 +546,7 @@ BoundaryConditionParameters::BoundaryConditionParameters() {
   set_parameter("Distal_pressure", {}, !required, distal_pressure);
 
   set_parameter("Effective_direction", {}, !required, effective_direction);
+  set_parameter("Energy_balance_face", "", !required, energy_balance_face);
   // set_parameter("Effective_direction", {0,0,0}, !required,
   // effective_direction);
   set_parameter("Follower_pressure_load", false, !required,

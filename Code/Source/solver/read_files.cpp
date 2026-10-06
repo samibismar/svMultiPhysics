@@ -1799,6 +1799,53 @@ void read_eq(Simulation* simulation, EquationParameters* eq_params, eqType& lEq)
     read_bc(simulation, eq_params, lEq, bc_params, lEq.bc[iBc]);
   }
 
+  // Resolve the material face after reading all BCs; Robin supports remain independent.
+  for (int iBc = 0; iBc < num_bcs; ++iBc) {
+    const auto& params = *eq_params->boundary_conditions[iBc];
+    if (!params.energy_balance_face.defined()) {
+      continue;
+    }
+    auto& bc = lEq.bc[iBc];
+    const auto target_name = params.energy_balance_face.value();
+    const auto fail = [&](const std::string& reason) {
+      svmp::raise<svmp::ParseException>("Energy_balance_face on '" +
+          params.name.value() + "': " + reason);
+    };
+    const auto has = [&](BoundaryConditionType type) {
+      return utils::btest(bc.bType, enum_int(type));
+    };
+    if (com_mod.nsd != 3 || lEq.phys != EquationType::phys_struct) {
+      fail("the frozen basal load is currently implemented for 3-D STRUCT only.");
+    }
+    if (std::set<std::string>{"Neumann", "Neu"}.count(params.type.value()) == 0 || !bc.flwP ||
+        !(has(BoundaryConditionType::bType_std) || has(BoundaryConditionType::bType_ustd))) {
+      fail("requires a steady or unsteady prescribed Neumann pressure with "
+           "Follower_pressure_load enabled; coupled pressure is not implemented.");
+    }
+    int target_mesh = -1;
+    int target_face = -1;
+    int matches = 0;
+    for (int iM = 0; iM < com_mod.nMsh; ++iM) {
+      for (int iFa = 0; iFa < com_mod.msh[iM].nFa; ++iFa) {
+        if (com_mod.msh[iM].fa[iFa].name == target_name) {
+          target_mesh = iM;
+          target_face = iFa;
+          ++matches;
+        }
+      }
+    }
+    if (target_name.empty() || matches != 1) {
+      fail("'" + target_name + "' must identify exactly one mesh face.");
+    }
+    if (target_mesh != bc.iM || target_face == bc.iFa) {
+      fail("the basal face must differ from the pressure face and belong to the same mesh.");
+    }
+    if (com_mod.msh[bc.iM].lShl) {
+      fail("requires a solid volume mesh; shell meshes are not supported.");
+    }
+    bc.energy_balance_face = target_face;
+  }
+
   // Initialize cplBC for RCR-type BC
   //
   bool has_rcr_bc = false;
@@ -2042,6 +2089,18 @@ void read_files(Simulation* simulation, const std::string& file_name)
       // Use the explicit geometry coupling flag of the FSI equation.
       eq.expl_geom_cpl = com_mod.eq[0].expl_geom_cpl; 
     }     
+  }
+  // Prestress in any equation resets old displacement in the global predictor.
+  if (com_mod.pstEq) {
+    for (const auto& eq : com_mod.eq) {
+      for (const auto& bc : eq.bc) {
+        if (bc.energy_balance_face >= 0) {
+          svmp::raise<svmp::ParseException>(
+              "Energy_balance_face does not support prestress iteration because "
+              "the predictor resets the accepted displacement.");
+        }
+      }
+    }
   }
   #ifdef debug_read_files
   dmsg << "Done Read equations " << " ";
