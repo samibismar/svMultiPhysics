@@ -78,6 +78,21 @@ std::vector<double> last_state_y(system_size);
 std::vector<double> last_state_ydot(system_size);
 std::vector<int> sol_IDs(2 * numCoupledSrfs);
 
+double accepted_pressure(ComMod& com_mod, const CmMod& cm_mod,
+    const CoupledBoundaryCondition& bc)
+{
+  auto& cm = com_mod.cm;
+  double pressure = 0.0;
+  if (cm.mas(cm_mod)) {
+    pressure = bc.get_ramp_step_count() > 0
+        ? bc.get_P_neu_prev() : last_state_y[bc.get_pressure_sol_id()];
+  }
+  if (!cm.seq()) {
+    cm.bcast(cm_mod, &pressure);
+  }
+  return pressure;
+}
+
 void create_svZeroD_model(std::string lpn_library_name, std::string lpn_json_file)
 {
     // Load library
