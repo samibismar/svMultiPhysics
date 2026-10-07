@@ -1817,10 +1817,13 @@ void read_eq(Simulation* simulation, EquationParameters* eq_params, eqType& lEq)
     if (com_mod.nsd != 3 || lEq.phys != EquationType::phys_struct) {
       fail("the frozen basal load is currently implemented for 3-D STRUCT only.");
     }
+    const bool svzerod_pressure = has(BoundaryConditionType::bType_Coupled) &&
+        !bc.coupled_bc.is_svOneD_face();
     if (std::set<std::string>{"Neumann", "Neu"}.count(params.type.value()) == 0 || !bc.flwP ||
-        !(has(BoundaryConditionType::bType_std) || has(BoundaryConditionType::bType_ustd))) {
-      fail("requires a steady or unsteady prescribed Neumann pressure with "
-           "Follower_pressure_load enabled; coupled pressure is not implemented.");
+        !(has(BoundaryConditionType::bType_std) || has(BoundaryConditionType::bType_ustd) ||
+          svzerod_pressure)) {
+      fail("requires steady or unsteady prescribed pressure, or svZeroDSolver Neumann "
+           "coupling, with Follower_pressure_load enabled.");
     }
     int target_mesh = -1;
     int target_face = -1;

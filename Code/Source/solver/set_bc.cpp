@@ -1480,8 +1480,9 @@ void prepare_energy_balance(ComMod& com_mod, const CmMod& cm_mod,
       if (bc.energy_balance_face < 0) { continue; }
       const auto& endo = com_mod.msh[bc.iM].fa[bc.iFa];
       const auto& base = com_mod.msh[bc.iM].fa[bc.energy_balance_face];
-      const double pressure = utils::btest(bc.bType, iBC_std)
-          ? bc.g : bc.gt.value(evaluation_time)(0);
+      const double pressure = utils::btest(bc.bType, iBC_Coupled)
+          ? svZeroD::accepted_pressure(com_mod, cm_mod, bc.coupled_bc)
+          : (utils::btest(bc.bType, iBC_std) ? bc.g : bc.gt.value(evaluation_time)(0));
 
       // Match set_bc_neu_l's nodal pressure field; gx includes profile initialization.
       Vector<double> nodal_pressure(com_mod.tnNo);
