@@ -38,6 +38,11 @@ void init_svZeroD(ComMod& com_mod, const CmMod& cm_mod,
 
 void calc_svZeroD(ComMod& com_mod, const CmMod& cm_mod, char BCFlag);
 
+/// @brief Broadcast the last committed relaxed Neumann pressure, or the model's
+/// initialized pressure before the first commit. Call collectively after init_svZeroD.
+double accepted_pressure(ComMod& com_mod, const CmMod& cm_mod,
+    const CoupledBoundaryCondition& bc);
+
 };
 
 #endif
