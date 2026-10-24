@@ -36,7 +36,8 @@ void set_bc_dir_wl(ComMod& com_mod, const bcType& lBc, const mshType& lM, const 
 void set_bc_neu(ComMod& com_mod, const CmMod& cm_mod, const SolutionStates& solutions);
 
 /// @brief Cache basal element loads from old displacement and prescribed pressure
-/// at evaluation_time, using initialized bc.gx. Call before the predictor for com_mod.cTS.
+/// at evaluation_time or accepted svZeroD pressure, using initialized bc.gx.
+/// Call before the predictor for com_mod.cTS.
 void prepare_energy_balance(ComMod& com_mod, const CmMod& cm_mod,
     const SolutionStates& solutions, double evaluation_time);
 
