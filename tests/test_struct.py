@@ -27,6 +27,10 @@ def test_LV_HolzapfelOgden_active(n_proc):
     test_folder = "LV_HolzapfelOgden_active"
     run_with_reference(base_folder, test_folder, fields, n_proc)
 
+def test_LV_HolzapfelOgden_active_energy_balance(n_proc):
+    test_folder = "LV_HolzapfelOgden_active_energy_balance"
+    run_with_reference(base_folder, test_folder, fields, n_proc)
+
 @skip_if_no_trilinos
 def test_LV_HolzapfelOgden_active_trilinos_ml(n_proc):
     test_folder = "LV_HolzapfelOgden_active_trilinos_ml"
