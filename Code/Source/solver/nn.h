@@ -44,7 +44,7 @@ namespace nn {
    *
    * Returns the outward normal at element 'e', Gauss point 'g' of face 'lFa',
    * weighted by the surface Jacobian: Jac = norm(n) is the Jacobian of the
-   * mapping from the parent surface element to the reference/old/new
+   * mapping from the parent surface element to the selected mechanical
    * configuration.
    *
    * For simulations involving structural displacement, this function allows
@@ -52,6 +52,7 @@ namespace nn {
    * - reference configuration (the mesh is not displaced);
    * - current configuration (the mesh is displaced by the current displacement
    *   field);
+   * - intermediate configuration (the generalized-alpha displacement field);
    * - old configuration (the mesh is displaced by the displacement field from
    *   previous time step).
    *
@@ -66,7 +67,7 @@ namespace nn {
    * @param[in] solutions The solution states that the displacement fields are
    *   extracted from.
    * @param[in] cfg The configuration in which the normal vector is computed
-   *   (reference, old or current).
+   *   (reference, old, current or intermediate).
    * @param[in] displacement_index The index of the displacement field in the
    *   solution arrays. This should correspond to the start index of the
    *   equation that solves for the displacement.

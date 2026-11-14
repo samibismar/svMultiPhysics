@@ -122,9 +122,11 @@ class bcType
 
     // Basal material face in mesh iM; -1 disables pressure balancing.
     int energy_balance_face = -1;
+    consts::EnergyBalanceTreatmentType energy_balance_treatment =
+        consts::EnergyBalanceTreatmentType::explicit_load;
 
-    // Physical nodal forces (component, face node, local face element),
-    // evaluated from the accepted state and held fixed for energy_balance_step.
+    // Basal nodal loads (component, face node, local face element).
+    // Semi-implicit stores unit-pressure loads; the other treatments store forces.
     Array3<double> energy_balance_load;
     int energy_balance_step = -1;
 

@@ -638,6 +638,7 @@ void dist_bc(ComMod& com_mod, const CmMod& cm_mod, const cmType& cm, bcType& lBc
 
   cm.bcast(cm_mod, &lBc.iFa);
   cm.bcast(cm_mod, &lBc.energy_balance_face);
+  cm.bcast_enum(cm_mod, &lBc.energy_balance_treatment);
   cm.bcast(cm_mod, &lBc.iM);
   cm.bcast(cm_mod, &lBc.r);
   cm.bcast(cm_mod, &lBc.g);

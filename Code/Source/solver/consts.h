@@ -495,7 +495,15 @@ enum class MechanicalConfigurationType
 { 
   reference, // reference configuration
   old_timestep, // old timestep (n) configuration
-  new_timestep // new timestep (n+1) configuration
+  new_timestep, // new timestep (n+1) configuration
+  intermediate // generalized-alpha assembly configuration
+};
+
+enum class EnergyBalanceTreatmentType
+{
+  explicit_load,
+  semi_implicit,
+  fully_implicit
 };
 
 //-------------------
