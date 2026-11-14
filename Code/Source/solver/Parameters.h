@@ -875,6 +875,7 @@ class BoundaryConditionParameters : public ParameterLists
     Parameter<double> distal_pressure;
     VectorParameter<int> effective_direction;
     Parameter<std::string> energy_balance_face;
+    Parameter<std::string> energy_balance_treatment;
     Parameter<bool> follower_pressure_load;
     Parameter<std::string> fourier_coefficients_file_path;
 

@@ -1021,6 +1021,11 @@ Vector<double> gnnb(const ComMod &com_mod, const faceType &lFa, const int e,
             lX(i, a) = lX(i, a) + Dn(displacement_index + i, Ac);
           }
           break;
+        case MechanicalConfigurationType::intermediate:
+          for (int i = 0; i < lX.nrows(); i++) {
+            lX(i, a) += solutions.intermediate.get_displacement()(displacement_index + i, Ac);
+          }
+          break;
         default:
           svmp::raise<fe::InvalidArgumentException>("gnnb: invalid MechanicalConfigurationType provided");
       }

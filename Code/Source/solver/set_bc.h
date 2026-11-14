@@ -35,13 +35,15 @@ void set_bc_dir_wl(ComMod& com_mod, const bcType& lBc, const mshType& lM, const 
 
 void set_bc_neu(ComMod& com_mod, const CmMod& cm_mod, const SolutionStates& solutions);
 
-/// @brief Cache basal element loads from old displacement and prescribed pressure
-/// at evaluation_time or accepted svZeroD pressure, using initialized bc.gx.
-/// Call before the predictor for com_mod.cTS.
+/// @brief Prepare old-geometry basal loads before the predictor for com_mod.cTS.
+/// Explicit uses prescribed pressure at evaluation_time or accepted svZeroD pressure.
+/// Semi-implicit caches unit-pressure loads; fully implicit defers to set_bc_neu.
 void prepare_energy_balance(ComMod& com_mod, const CmMod& cm_mod,
     const SolutionStates& solutions, double evaluation_time);
 
-/// @brief Assemble the cached physical load with residual sign minus and zero tangent.
+/// @brief Assemble basal loads with a minus sign in the residual and zero tangent.
+/// Semi-implicit scales the cache by the current prescribed/coupled pressure.
+/// Fully implicit requires set_bc_neu to refresh it using intermediate geometry.
 void assemble_energy_balance(ComMod& com_mod, const bcType& bc);
 
 void set_bc_neu_l(ComMod& com_mod, const CmMod& cm_mod, const bcType& lBc, const faceType& lFa, const SolutionStates& solutions);

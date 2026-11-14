@@ -1880,6 +1880,8 @@ void read_eq(Simulation* simulation, EquationParameters* eq_params, eqType& lEq)
   for (int iBc = 0; iBc < num_bcs; ++iBc) {
     const auto& params = *eq_params->boundary_conditions[iBc];
     if (!params.energy_balance_face.defined()) {
+      svmp::throw_if<svmp::ParseException>(params.energy_balance_treatment.defined(),
+          "Energy_balance_treatment on '" + params.name.value() + "' requires Energy_balance_face.");
       continue;
     }
     auto& bc = lEq.bc[iBc];
@@ -1891,8 +1893,19 @@ void read_eq(Simulation* simulation, EquationParameters* eq_params, eqType& lEq)
     const auto has = [&](BoundaryConditionType type) {
       return utils::btest(bc.bType, enum_int(type));
     };
+    const auto treatment = params.energy_balance_treatment.value();
+    if (treatment == "explicit") {
+      bc.energy_balance_treatment = EnergyBalanceTreatmentType::explicit_load;
+    } else if (treatment == "semi-implicit") {
+      bc.energy_balance_treatment = EnergyBalanceTreatmentType::semi_implicit;
+    } else if (treatment == "fully-implicit") {
+      bc.energy_balance_treatment = EnergyBalanceTreatmentType::fully_implicit;
+    } else {
+      fail("Energy_balance_treatment must be explicit, semi-implicit or fully-implicit; got '" +
+          treatment + "'.");
+    }
     if (com_mod.nsd != 3 || lEq.phys != EquationType::phys_struct) {
-      fail("the frozen basal load is currently implemented for 3-D STRUCT only.");
+      fail("the basal load is currently implemented for 3-D STRUCT only.");
     }
     const bool svzerod_pressure = has(BoundaryConditionType::bType_Coupled) &&
         !bc.coupled_bc.is_svOneD_face();
