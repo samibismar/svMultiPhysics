@@ -1880,6 +1880,8 @@ void read_eq(Simulation* simulation, EquationParameters* eq_params, eqType& lEq)
   for (int iBc = 0; iBc < num_bcs; ++iBc) {
     const auto& params = *eq_params->boundary_conditions[iBc];
     if (!params.energy_balance_face.defined()) {
+      svmp::throw_if<svmp::ParseException>(params.energy_balance_pressure_tangent.value(),
+          "Energy_balance_pressure_tangent requires Energy_balance_face.");
       svmp::throw_if<svmp::ParseException>(params.energy_balance_treatment.defined(),
           "Energy_balance_treatment on '" + params.name.value() + "' requires Energy_balance_face.");
       continue;
@@ -1937,6 +1939,33 @@ void read_eq(Simulation* simulation, EquationParameters* eq_params, eqType& lEq)
       fail("requires a solid volume mesh; shell meshes are not supported.");
     }
     bc.energy_balance_face = target_face;
+    bc.energy_balance_pressure_tangent = params.energy_balance_pressure_tangent.value();
+    if (bc.energy_balance_pressure_tangent) {
+      if (bc.energy_balance_treatment == EnergyBalanceTreatmentType::explicit_load ||
+          !svzerod_pressure || !cplBC.useSvZeroD || cplBC.useSvOneD ||
+          cplBC.schm != CplBCType::cplBC_I) {
+        fail("Energy_balance_pressure_tangent requires semi-implicit or fully-implicit ECBC "
+             "with implicit svZeroDSolver Neumann coupling.");
+      }
+      int ports = cplBC.nFa;
+      for (const auto& other : lEq.bc) {
+        if (utils::btest(other.bType, enum_int(BoundaryConditionType::bType_Coupled))) { ++ports; }
+      }
+      if (ports != 1) {
+        fail("Energy_balance_pressure_tangent currently requires exactly one circulation port.");
+      }
+      if (lEq.linear_algebra_type != LinearAlgebraType::fsils ||
+          (lEq.linear_algebra_assembly_type != LinearAlgebraType::none &&
+           lEq.linear_algebra_assembly_type != LinearAlgebraType::fsils) ||
+          lEq.linear_algebra_preconditioner != PreconditionerType::PREC_FSILS ||
+          lEq.ls.LS_type != SolverType::lSolver_GMRES) {
+        fail("Energy_balance_pressure_tangent requires FSILS assembly and GMRES with "
+             "the fsils diagonal preconditioner.");
+      }
+      if (com_mod.mvMsh || com_mod.msh[bc.iM].eType == ElementType::NRB) {
+        fail("Energy_balance_pressure_tangent does not support moving-mesh or NURBS equations.");
+      }
+    }
   }
 
   // Initialize cplBC for RCR-type BC

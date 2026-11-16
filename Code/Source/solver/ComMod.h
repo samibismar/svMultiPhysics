@@ -129,6 +129,9 @@ class bcType
     // Semi-implicit stores unit-pressure loads; the other treatments store forces.
     Array3<double> energy_balance_load;
     int energy_balance_step = -1;
+    bool energy_balance_pressure_tangent = false;
+    // Unit-pressure basal loads for the pressure-feedback tangent; same layout as energy_balance_load.
+    Array3<double> energy_balance_pressure_load;
 
     // Pointer to FSILS%bc
     int lsPtr = -1;

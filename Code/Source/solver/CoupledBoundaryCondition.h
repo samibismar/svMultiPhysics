@@ -155,6 +155,11 @@ class CappingSurface {
         /// @brief Compute the cap contribution to the linear solver face (fills \ref valM_; safe under \c const *this).
         void compute_valM(consts::MechanicalConfigurationType cfg, const CapGlobalMeshState& st) const;
 
+        /// @brief dQ/dv + displacement_per_velocity*dQ/dd at the endpoint, in cap-node order.
+        /// @param displacement_per_velocity beta*dt/gamma for the STRUCT acceleration unknown.
+        Array<double> endpoint_flow_gradient(const CapGlobalMeshState& st,
+                                             double displacement_per_velocity) const;
+
         /// @brief Get the cap face.
         const faceType* face() const { return face_.get(); }
 
@@ -428,6 +433,12 @@ public:
     /// @param com_mod ComMod reference containing simulation data
     /// @param cm_mod CmMod reference for communication
     void compute_flowrates(ComMod& com_mod, const CmMod& cm_mod, const SolutionStates& solutions);
+
+    /// @brief Local element contributions to dQ/dv + displacement_per_velocity*dQ/dd.
+    /// @param displacement_per_velocity beta*dt/gamma for the STRUCT acceleration unknown.
+    /// @return Unassembled mesh-node vector; cap contributions are inserted on owned nodes only.
+    Array<double> endpoint_flow_gradient(ComMod& com_mod, const CmMod& cm_mod,
+        const SolutionStates& solutions, double displacement_per_velocity) const;
 
     /// @brief Initialize cap quadrature on the master (call from \c baf_ini after partition).
     void initialize_cap(ComMod& com_mod);

@@ -141,6 +141,11 @@ class FSILS_faceType
 
     /// Coupled: True if this face has a cap (set from coupled_bc.has_cap() so all ranks agree in parallel)
     bool has_cap = false;
+
+    // Basal pressure feedback: -res * left * right^T. Full local FSILS node ordering.
+    // left = unit-pressure basal load; right = (dQ/da)/(gamma*dt).
+    Array<double> basal_pressure_left, basal_pressure_right;
+    Array<double> basal_pressure_left_scaled, basal_pressure_right_scaled;
 };
 
 /// @brief Modified in:

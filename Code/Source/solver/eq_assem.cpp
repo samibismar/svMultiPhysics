@@ -373,6 +373,36 @@ void fsi_ls_upd(ComMod& com_mod, const bcType& lBc, const faceType& lFa, const S
   }
 };
 
+void update_energy_balance_pressure_tangent(ComMod& com_mod, const CmMod& cm_mod,
+    const bcType& bc, const SolutionStates& solutions)
+{
+  auto& lhs = com_mod.lhs;
+  auto& face = lhs.face[bc.lsPtr];
+  const auto& eq = com_mod.eq[com_mod.cEq];
+  const auto& base = com_mod.msh[bc.iM].fa[bc.energy_balance_face];
+  face.basal_pressure_left.resize(com_mod.nsd, lhs.nNo);
+  face.basal_pressure_right.resize(com_mod.nsd, lhs.nNo);
+  face.basal_pressure_left = 0.0;
+  face.basal_pressure_right = 0.0;
+  for (int e = 0; e < base.nEl; ++e) {
+    for (int a = 0; a < base.eNoN; ++a) {
+      const int node = lhs.map(base.IEN(a, e));
+      for (int i = 0; i < com_mod.nsd; ++i) {
+        face.basal_pressure_left(i, node) += bc.energy_balance_pressure_load(i, a, e);
+      }
+    }
+  }
+  const auto gradient = bc.coupled_bc.endpoint_flow_gradient(com_mod, cm_mod, solutions,
+      eq.beta * com_mod.dt / eq.gam);
+  for (int a = 0; a < com_mod.tnNo; ++a) {
+    for (int i = 0; i < com_mod.nsd; ++i) {
+      face.basal_pressure_right(i, lhs.map(a)) = gradient(i, a);
+    }
+  }
+  fsi_linear_solver::fsils_commuv(lhs, com_mod.nsd, face.basal_pressure_left);
+  fsi_linear_solver::fsils_commuv(lhs, com_mod.nsd, face.basal_pressure_right);
+}
+
 /// @brief This routine assembles the equation on a given mesh.
 ///
 /// Ag(tDof,tnNo), Yg(tDof,tnNo), Dg(tDof,tnNo) are taken from solutions.intermediate.

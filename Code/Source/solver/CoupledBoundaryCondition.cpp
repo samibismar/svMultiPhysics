@@ -12,6 +12,40 @@
 #include <unordered_set>
 #include <vtkCellType.h>
 
+namespace {
+
+// Differentiate v . c with c = sigma*(t1 x t2), holding the orientation branch fixed.
+// The returned vector is dQ/dv + scale*dQ/dd, not yet multiplied by gamma*dt.
+void add_flux_gradient(const faceType& face, int g, const Array<double>& x,
+    const Array<double>& velocity, const Vector<double>& normal, double scale,
+    Array<double>& gradient)
+{
+    Array<double> tangents(3, 2);
+    Vector<double> v(3);
+    for (int a = 0; a < face.eNoN; ++a) {
+        for (int i = 0; i < 3; ++i) {
+            v(i) += face.N(a, g) * velocity(i, a);
+            for (int j = 0; j < 2; ++j) {
+                tangents(i, j) += x(i, a) * face.Nx(j, a, g);
+            }
+        }
+    }
+    const auto raw_normal = utils::cross(tangents);
+    const double sign = raw_normal * normal < 0.0 ? -1.0 : 1.0;
+    for (int a = 0; a < face.eNoN; ++a) {
+        for (int i = 0; i < 3; ++i) {
+            const int j = (i + 1) % 3;
+            const int k = (i + 2) % 3;
+            const double geometric = sign * (
+                face.Nx(0, a, g) * (v(k)*tangents(j, 1) - v(j)*tangents(k, 1)) +
+                face.Nx(1, a, g) * (v(j)*tangents(k, 0) - v(k)*tangents(j, 0)));
+            gradient(i, a) += face.w(g) * (face.N(a, g)*normal(i) + scale*geometric);
+        }
+    }
+}
+
+} // namespace
+
 // =========================================================================
 // CoupledBoundaryCondition
 // =========================================================================
@@ -334,6 +368,48 @@ void CoupledBoundaryCondition::compute_flowrates(ComMod& com_mod, const CmMod& c
         Qo_ += Qo_cap;
         Qn_ += Qn_cap;
     }
+}
+
+Array<double> CoupledBoundaryCondition::endpoint_flow_gradient(ComMod& com_mod,
+    const CmMod& cm_mod, const SolutionStates& solutions, double displacement_per_velocity) const
+{
+    const auto& eq = com_mod.eq[com_mod.cplBC.equationIndex];
+    const auto& d = solutions.current.get_displacement();
+    const auto& v = solutions.current.get_velocity();
+    Array<double> gradient(3, com_mod.tnNo);
+    for (int e = 0; e < face_->nEl; ++e) {
+        Array<double> x(3, face_->eNoN), velocity(3, face_->eNoN), local(3, face_->eNoN);
+        for (int a = 0; a < face_->eNoN; ++a) {
+            const int node = face_->IEN(a, e);
+            for (int i = 0; i < 3; ++i) {
+                x(i, a) = com_mod.x(i, node) + d(eq.s + i, node);
+                velocity(i, a) = v(eq.s + i, node);
+            }
+        }
+        for (int g = 0; g < face_->nG; ++g) {
+            const auto normal = nn::gnnb(com_mod, *face_, e, g, face_->Nx.slice(g),
+                solutions, consts::MechanicalConfigurationType::new_timestep, eq.s);
+            add_flux_gradient(*face_, g, x, velocity, normal, displacement_per_velocity, local);
+        }
+        for (int a = 0; a < face_->eNoN; ++a) {
+            for (int i = 0; i < 3; ++i) { gradient(i, face_->IEN(a, e)) += local(i, a); }
+        }
+    }
+    if (has_cap_) {
+        gather_global_mesh_state(com_mod, cm_mod, solutions, true);
+        Array<double> cap_gradient(3, cap_n_no_);
+        if (com_mod.cm.mas(cm_mod)) {
+            cap_gradient = cap_->endpoint_flow_gradient(cap_global_mesh_state_, displacement_per_velocity);
+        }
+        com_mod.cm.bcast(cm_mod, cap_gradient);
+        for (int a = 0; a < com_mod.tnNo; ++a) {
+            const auto found = cap_g_to_cap_col_.find(com_mod.ltg(a));
+            if (found != cap_g_to_cap_col_.end() && com_mod.lhs.map(a) < com_mod.lhs.mynNo) {
+                for (int i = 0; i < 3; ++i) { gradient(i, a) += cap_gradient(i, found->second); }
+            }
+        }
+    }
+    return gradient;
 }
 
 /// @brief Compute average pressures at the boundary face at old and new timesteps
@@ -1235,6 +1311,30 @@ double CappingSurface::integrate_velocity_flux(const CapGlobalMeshState& st, boo
     return result;
 }
 
+
+Array<double> CappingSurface::endpoint_flow_gradient(const CapGlobalMeshState& st,
+    double displacement_per_velocity) const
+{
+    std::unordered_map<int, int> columns;
+    for (int a = 0; a < face_->nNo; ++a) { columns[face_->gN(a)] = a; }
+    Array<double> gradient(3, face_->nNo);
+    for (int e = 0; e < face_->nEl; ++e) {
+        const auto x = update_element_position_global(e, consts::MechanicalConfigurationType::new_timestep,
+            st.x, st.Do, st.Dn, columns);
+        Array<double> velocity(3, face_->eNoN), local(3, face_->eNoN);
+        for (int a = 0; a < face_->eNoN; ++a) {
+            for (int i = 0; i < 3; ++i) { velocity(i, a) = st.Yn(i, columns.at(face_->IEN(a, e))); }
+        }
+        for (int g = 0; g < face_->nG; ++g) {
+            const auto [jacobian, normal] = compute_jacobian_and_normal(x, e, g);
+            add_flux_gradient(*face_, g, x, velocity, normal * jacobian, displacement_per_velocity, local);
+        }
+        for (int a = 0; a < face_->eNoN; ++a) {
+            for (int i = 0; i < 3; ++i) { gradient(i, columns.at(face_->IEN(a, e))) += local(i, a); }
+        }
+    }
+    return gradient;
+}
 
 /// @brief Computes the cap contribution to the linear solver face.
 /// @param cfg The mechanical configuration type.

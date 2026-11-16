@@ -1473,11 +1473,15 @@ static void prepare_energy_balance_load(ComMod& com_mod, const CmMod& cm_mod,
   const auto& base = com_mod.msh[bc.iM].fa[bc.energy_balance_face];
   // Match set_bc_neu_l's nodal pressure field; gx includes profile initialization.
   Vector<double> nodal_pressure(com_mod.tnNo);
+  Vector<double> nodal_profile;
+  if (bc.energy_balance_pressure_tangent) { nodal_profile.resize(com_mod.tnNo); }
   for (int a = 0; a < endo.nNo; ++a) {
     nodal_pressure(endo.gN(a)) = pressure * bc.gx(a);
+    if (bc.energy_balance_pressure_tangent) { nodal_profile(endo.gN(a)) = bc.gx(a); }
   }
 
   Vector<double> resultant(com_mod.nsd);
+  Vector<double> unit_resultant(com_mod.nsd);
   for (int e = 0; e < endo.nEl; ++e) {
     for (int g = 0; g < endo.nG; ++g) {
       double pressure_g = 0.0;
@@ -1488,6 +1492,16 @@ static void prepare_energy_balance_load(ComMod& com_mod, const CmMod& cm_mod,
           solutions, configuration, eq.s);
       for (int i = 0; i < com_mod.nsd; ++i) {
         resultant(i) += endo.w(g) * pressure_g * normal(i);
+      }
+      if (bc.energy_balance_pressure_tangent) {
+        double profile_g = 0.0;
+        for (int a = 0; a < endo.eNoN; ++a) {
+          // nodal_pressure cannot be divided by pressure at zero-pressure startup.
+          profile_g += endo.N(a, g) * nodal_profile(endo.IEN(a, e));
+        }
+        for (int i = 0; i < com_mod.nsd; ++i) {
+          unit_resultant(i) += endo.w(g) * profile_g * normal(i);
+        }
       }
     }
   }
@@ -1521,6 +1535,17 @@ static void prepare_energy_balance_load(ComMod& com_mod, const CmMod& cm_mod,
   }
   svmp::throw_if<svmp::FE::InvalidArgumentException>(invalid,
       "Energy_balance_face '" + base.name + "': invalid pressure, resultant or basal area.");
+  if (bc.energy_balance_pressure_tangent) {
+    unit_resultant = cm.reduce(cm_mod, unit_resultant);
+    bc.energy_balance_pressure_load = bc.energy_balance_load;
+    for (int e = 0; e < base.nEl; ++e) {
+      for (int a = 0; a < base.eNoN; ++a) {
+        for (int i = 0; i < com_mod.nsd; ++i) {
+          bc.energy_balance_pressure_load(i, a, e) *= unit_resultant(i) / area;
+        }
+      }
+    }
+  }
   for (int e = 0; e < base.nEl; ++e) {
     for (int a = 0; a < base.eNoN; ++a) {
       for (int i = 0; i < com_mod.nsd; ++i) {
@@ -1561,10 +1586,12 @@ void assemble_energy_balance(ComMod& com_mod, const bcType& bc)
       "Energy_balance_face '" + face.name + "': load was not prepared for this timestep.");
 
   // The semi-implicit cache contains the old-geometry load for unit pressure.
+  const double alpha_time =
+      utils::generalized_alpha_time(com_mod.time, com_mod.dt, eq.af);
   const double pressure_scale =
       bc.energy_balance_treatment == consts::EnergyBalanceTreatmentType::semi_implicit
           ? (utils::btest(bc.bType, consts::iBC_Coupled) || utils::btest(bc.bType, consts::iBC_std)
-              ? bc.g : bc.gt.value(com_mod.time)(0)) : 1.0;
+              ? bc.g : bc.gt.value(alpha_time)(0)) : 1.0;
   svmp::throw_if<svmp::FE::InvalidArgumentException>(!std::isfinite(pressure_scale),
       "Energy_balance_face '" + face.name + "': invalid current pressure.");
 
@@ -1628,12 +1655,17 @@ void set_bc_neu(ComMod& com_mod, const CmMod& cm_mod, const SolutionStates& solu
       set_bc_neu_l(com_mod, cm_mod, bc, com_mod.msh[iM].fa[iFa], solutions);
       if (bc.energy_balance_treatment == EnergyBalanceTreatmentType::fully_implicit) {
         // Match the follower pressure and geometry in every residual, including line-search trials.
+        const double alpha_time =
+            utils::generalized_alpha_time(com_mod.time, com_mod.dt, eq.af);
         const double pressure = utils::btest(bc.bType, iBC_Coupled) || utils::btest(bc.bType, iBC_std)
-            ? bc.g : bc.gt.value(com_mod.time)(0);
+            ? bc.g : bc.gt.value(alpha_time)(0);
         prepare_energy_balance_load(com_mod, cm_mod, solutions, eq, bc, pressure,
             MechanicalConfigurationType::intermediate);
       }
       assemble_energy_balance(com_mod, bc);
+      if (bc.energy_balance_pressure_tangent) {
+        eq_assem::update_energy_balance_pressure_tangent(com_mod, cm_mod, bc, solutions);
+      }
 
     } else if (utils::btest(bc.bType,iBC_trac)) { 
       set_bc_trac_l(com_mod, cm_mod, bc, com_mod.msh[iM].fa[iFa], solutions);

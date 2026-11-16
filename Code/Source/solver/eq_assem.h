@@ -16,6 +16,9 @@ void b_neu_folw_p(ComMod& com_mod, const bcType& lBc, const faceType& lFa, const
 
 void fsi_ls_upd(ComMod& com_mod, const bcType& lBc, const faceType& lFa, const SolutionStates& solutions);
 
+void update_energy_balance_pressure_tangent(ComMod& com_mod, const CmMod& cm_mod,
+    const bcType& bc, const SolutionStates& solutions);
+
 void global_eq_assem(ComMod& com_mod, CepMod& cep_mod, const mshType& lM, const SolutionStates& solutions);
 
 };

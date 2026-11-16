@@ -219,6 +219,10 @@ void precond_diag(fsi_linear_solver::FSILS_lhsType& lhs, const Array<int>& rowPt
     auto& face = lhs.face[faIn];
 
     if (face.coupledFlag) {
+      if (face.basal_pressure_left.size() != 0) {
+        face.basal_pressure_left_scaled = W * face.basal_pressure_left;
+        face.basal_pressure_right_scaled = W * face.basal_pressure_right;
+      }
       for (int a = 0; a < face.nNo; a++) {
         int Ac = face.glob(a);
         for (int i = 0; i < std::min(face.dof,dof); i++) {

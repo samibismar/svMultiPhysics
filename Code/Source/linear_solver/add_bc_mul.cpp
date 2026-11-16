@@ -46,6 +46,15 @@ void add_bc_mul(FSILS_lhsType& lhs, const BcopType op_Type, const int dof, const
     int nsd = std::min(face.dof, dof);
 
     if (face.coupledFlag) {
+      if (op_Type == BcopType::BCOP_TYPE_ADD && face.basal_pressure_left_scaled.size() != 0) {
+        const double flow = dot::fsils_dot_v(dof, lhs.mynNo, lhs.commu,
+            face.basal_pressure_right_scaled, X);
+        for (int a = 0; a < lhs.nNo; ++a) {
+          for (int i = 0; i < nsd; ++i) {
+            Y(i, a) -= face.res * face.basal_pressure_left_scaled(i, a) * flow;
+          }
+        }
+      }
       // If face is shared across procs
       if (face.sharedFlag) {
         v = 0.0;
